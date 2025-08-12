@@ -1,0 +1,16 @@
+# Ignore dependencies
+node_modules/
+
+# Ignore build artifacts
+dist/
+build/
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore environment files
+.env*
+*.log
+
+# Ignore Python virtual environments
+worker/.venv/
