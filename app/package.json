@@ -2,14 +2,20 @@
   "name": "app",
   "version": "1.0.0",
   "description": "",
-  "main": "main.js",
+  "main": "src/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,md}\"",
+    "lint": "eslint src/**/*.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^37.2.6"
+    "@eslint/js": "^9.33.0",
+    "electron": "^37.2.6",
+    "eslint": "^9.33.0",
+    "globals": "^16.3.0",
+    "prettier": "^3.6.2"
   }
 }

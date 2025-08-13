@@ -1,3 +1,5 @@
+const path = require('path')
+
 // 1. Import the app (controls app lifecycle) and BrowserWindow (creates windows)
 const { app, BrowserWindow } = require('electron')
 
@@ -6,11 +8,11 @@ function createWindow() {
   // Create a new BrowserWindow object with size
   const win = new BrowserWindow({
     width: 800,
-    height: 600
+    height: 600,
   })
 
   // Load a local HTML file into the window
-  win.loadFile('index.html')
+  win.loadFile(path.join(__dirname, 'index.html'))
 }
 
 // 3. Wait until Electron is ready, then create the window
