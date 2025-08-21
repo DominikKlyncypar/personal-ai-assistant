@@ -5,7 +5,68 @@
     <title>AI Assistant</title>
   </head>
   <body>
-    <h1>Hello from Electron!</h1>
-    <p>If you can read this, your desktop app is working.</p>
+    <h1>AI Assistant</h1>
+
+    <h3>Worker status</h3>
+    <button id="pingBtn">Ping Worker</button>
+    <p>Status: <span id="status">Unknown</span></p>
+
+    <hr />
+
+    <h3>Echo test (Renderer → Main → Worker)</h3>
+    <input id="echoInput" placeholder="type something" />
+    <button id="echoBtn">Send</button>
+    <span id="echoOut"></span>
+
+    <script>
+      // --- Health check (with retry) ---
+      const btn = document.getElementById("pingBtn");
+      const statusEl = document.getElementById("status");
+
+      async function checkHealthOnce() {
+        const res = await fetch("http://127.0.0.1:8000/health", { method: "GET" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        return data?.status === "ok";
+      }
+
+      async function checkHealthWithRetry({ tries = 15, delayMs = 250 } = {}) {
+        statusEl.textContent = "Checking...";
+        for (let i = 0; i < tries; i++) {
+          try {
+            const ok = await checkHealthOnce();
+            if (ok) {
+              statusEl.textContent = "Worker Online ✅";
+              return;
+            }
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        statusEl.textContent = "Worker Offline ❌";
+      }
+
+      btn.addEventListener("click", () => checkHealthWithRetry());
+      window.addEventListener("DOMContentLoaded", () => checkHealthWithRetry());
+
+      // --- Echo test (Renderer -> Main -> Worker) ---
+      const echoInput = document.getElementById("echoInput");
+      const echoBtn = document.getElementById("echoBtn");
+      const echoOut = document.getElementById("echoOut");
+
+      echoBtn.addEventListener("click", async () => {
+        echoOut.textContent = "…";
+        try {
+          const msg = echoInput.value || "hello";
+          const res = await window.api.echo(msg);
+          // Expecting { echo: "..." }
+          echoOut.textContent = res && typeof res.echo !== "undefined"
+            ? String(res.echo)
+            : JSON.stringify(res);
+        } catch (e) {
+          echoOut.textContent = "error";
+          console.error(e);
+        }
+      });
+    </script>
   </body>
 </html>
