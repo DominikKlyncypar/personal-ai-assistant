@@ -3,52 +3,391 @@
   <head>
     <meta charset="UTF-8" />
     <title>AI Assistant</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
+      h1 { margin-bottom: 0.25rem; }
+      h2, h3 { margin-top: 1.25rem; }
+      label { display: inline-block; margin-top: 0.5rem; }
+      button { margin-left: 0.5rem; }
+      hr { margin: 1.25rem 0; }
+      #deviceHelp { font-size: 12px; color: #555; }
+      #levelMeter { width: 240px; height: 12px; background:#eee; border-radius:6px;
+                    box-shadow: inset 0 0 3px rgba(0,0,0,0.2); display:inline-block; vertical-align:middle; }
+      #levelBar { width: 0%; height: 100%; border-radius:6px;
+                  background: linear-gradient(90deg, #7fd, #0c9);
+                  transition: width 120ms linear; }
+      #speechLog { margin-top:6px; max-height:140px; overflow:auto; padding:8px;
+                   border:1px solid #ddd; border-radius:6px; background:#fafafa; font-size:12px; }
+      #vadDot { width:12px; height:12px; border-radius:50%; background:#bbb; box-shadow:0 0 2px rgba(0,0,0,0.3); }
+    </style>
   </head>
   <body>
     <h1>AI Assistant</h1>
+    <p>If you can read this, your desktop app is working.</p>
 
-    <h3>Worker status</h3>
+    <!-- Worker health / ping -->
+    <h2>Worker Test</h2>
     <button id="pingBtn">Ping Worker</button>
-    <p>Status: <span id="status">Unknown</span></p>
+    <p id="pingResult"></p>
+
+    <!-- Device picker -->
+    <h2>Audio Devices</h2>
+    <label>
+      Playback (Speakers for loopback on Windows):
+      <select id="playbackSelect"></select>
+    </label>
+    <br />
+    <label>
+      Microphone (optional):
+      <select id="micSelect"></select>
+    </label>
+    <button id="refreshDevices">Refresh devices</button>
+    <p id="deviceHelp"></p>
+
+    <!-- Start/Stop capture -->
+    <div style="margin-top: 10px;">
+      <button id="startBtn">Start Capture</button>
+      <button id="stopBtn">Stop Capture</button>
+      <span id="capStatus" style="margin-left:8px;"></span>
+    </div>
+
+    <!-- Simple level meter -->
+    <div id="meterRow" style="margin-top:10px;">
+      <div id="levelMeter"><div id="levelBar"></div></div>
+      <span id="levelLabel" style="margin-left:8px; font-size:12px; color:#555;">
+        Level: (waiting) | ~dB: —
+      </span>
+    </div>
+
+    <!-- VAD status -->
+    <div id="vadRow" style="margin-top:10px; display:flex; align-items:center; gap:8px;">
+      <div id="vadDot"></div>
+      <span id="vadLabel" style="font-size:12px; color:#555;">Speech: (idle)</span>
+    </div>
+
+    <!-- Speech event log -->
+    <div style="margin-top:12px;">
+      <strong>Speech events</strong>
+      <button id="clearLogBtn" style="margin-left:8px;">Clear</button>
+      <div id="speechLog"><em>Waiting…</em></div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <button id="dumpBtn">Save last 5s to WAV</button>
+      <span id="dumpStatus" style="margin-left:8px; font-size:12px; color:#555;"></span>
+    </div>
+
+    <!-- Preferences -->
+    <h3 style="margin-top:18px;">Preferences</h3>
+    <div style="margin-bottom:8px;">
+      <label>
+        Noise Gate (dB):
+        <input type="number" id="noiseGateInput" step="1" style="width:60px;" />
+      </label>
+    </div>
+    <div>
+      <label>
+        VAD Aggressiveness:
+        <select id="vadAggSelect">
+          <option value="0">0 (most permissive)</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3 (most strict)</option>
+        </select>
+      </label>
+    </div>
+    <p style="font-size:12px; color:#555;">
+      These values are saved in your browser (localStorage) and sent to the worker.
+    </p>
 
     <hr />
 
+    <!-- Echo IPC demo -->
     <h3>Echo test (Renderer → Main → Worker)</h3>
     <input id="echoInput" placeholder="type something" />
     <button id="echoBtn">Send</button>
     <span id="echoOut"></span>
 
     <script>
-      // --- Health check (with retry) ---
-      const btn = document.getElementById("pingBtn");
-      const statusEl = document.getElementById("status");
+      // ---------- Small helpers ----------
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+      // ---------- Preferences ----------
+      const noiseGateInput = document.getElementById('noiseGateInput');
+      const vadAggSelect   = document.getElementById('vadAggSelect');
+
+      function loadPreferences() {
+        let ng = localStorage.getItem('noiseGateDb');
+        let vad = localStorage.getItem('vadAgg');
+
+        if (ng === null || ng === '') {
+          ng = '-40'; // default
+          localStorage.setItem('noiseGateDb', ng);
+        }
+        if (vad === null || vad === '') {
+          vad = '3';  // default strict
+          localStorage.setItem('vadAgg', vad);
+        }
+
+        noiseGateInput.value = ng;
+        vadAggSelect.value = vad;
+      }
+
+      noiseGateInput.addEventListener('change', () => {
+        localStorage.setItem('noiseGateDb', noiseGateInput.value);
+      });
+      vadAggSelect.addEventListener('change', () => {
+        localStorage.setItem('vadAgg', vadAggSelect.value);
+      });
+
+      // ---------- Worker health (with retry) ----------
+      const pingBtn = document.getElementById("pingBtn");
+      const pingResult = document.getElementById("pingResult");
 
       async function checkHealthOnce() {
-        const res = await fetch("http://127.0.0.1:8000/health", { method: "GET" });
+        const res = await fetch("http://127.0.0.1:8000/health");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         return data?.status === "ok";
       }
 
-      async function checkHealthWithRetry({ tries = 15, delayMs = 250 } = {}) {
-        statusEl.textContent = "Checking...";
+      async function waitForWorkerOnline({ tries = 20, delayMs = 250 } = {}) {
         for (let i = 0; i < tries; i++) {
-          try {
-            const ok = await checkHealthOnce();
-            if (ok) {
-              statusEl.textContent = "Worker Online ✅";
-              return;
-            }
-          } catch (_) {}
-          await new Promise((r) => setTimeout(r, delayMs));
+          try { if (await checkHealthOnce()) return true; } catch (_) {}
+          await sleep(delayMs);
         }
-        statusEl.textContent = "Worker Offline ❌";
+        return false;
       }
 
-      btn.addEventListener("click", () => checkHealthWithRetry());
-      window.addEventListener("DOMContentLoaded", () => checkHealthWithRetry());
+      pingBtn.addEventListener("click", async () => {
+        pingResult.textContent = "Pinging…";
+        try {
+          const ok = await checkHealthOnce();
+          pingResult.textContent = ok ? "Worker responded: {\"status\":\"ok\"}" : "Unexpected response";
+        } catch (e) {
+          pingResult.textContent = "Ping failed: " + e.message;
+          console.error(e);
+        }
+      });
 
-      // --- Echo test (Renderer -> Main -> Worker) ---
+      // ---------- Device picker ----------
+      const playbackSelect = document.getElementById("playbackSelect");
+      const micSelect = document.getElementById("micSelect");
+      const deviceHelp = document.getElementById("deviceHelp");
+      const refreshBtn = document.getElementById("refreshDevices");
+
+      async function loadDevicesOnce() {
+        const res = await fetch("http://127.0.0.1:8000/devices");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+
+        playbackSelect.innerHTML = "";
+        micSelect.innerHTML = "";
+
+        for (const d of data.outputs) {
+          const opt = document.createElement("option");
+          opt.value = String(d.id);
+          opt.textContent = `${d.name} [${d.hostapi}]${d.loopback_capable ? " (loopback)" : ""}`;
+          playbackSelect.appendChild(opt);
+        }
+        for (const d of data.inputs) {
+          const opt = document.createElement("option");
+          opt.value = String(d.id);
+          opt.textContent = `${d.name} [${d.hostapi}]`;
+          micSelect.appendChild(opt);
+        }
+
+        if (data.os === "Windows_NT" || data.os === "Windows") {
+          deviceHelp.textContent = "Tip: choose your Speakers (WASAPI) for loopback capture. Mic is optional.";
+        } else {
+          deviceHelp.textContent = "You’re on macOS: loopback capture is a Windows feature. The picker will work on your mom’s PC.";
+        }
+      }
+
+      async function loadDevicesWithRetry({ tries = 5, delayMs = 500 } = {}) {
+        deviceHelp.textContent = "Loading devices…";
+        for (let i = 0; i < tries; i++) {
+          try { await loadDevicesOnce(); return; }
+          catch (e) {
+            console.warn("loadDevices attempt failed:", e.message);
+            if (i < tries - 1) await sleep(delayMs);
+            else deviceHelp.textContent = "Could not load devices.";
+          }
+        }
+      }
+
+      refreshBtn.addEventListener("click", () => loadDevicesWithRetry());
+
+      // ---------- Capture start/stop + status ----------
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn  = document.getElementById("stopBtn");
+      const capStatus = document.getElementById("capStatus");
+
+      async function refreshCaptureStatus() {
+        try {
+          const r = await fetch("http://127.0.0.1:8000/capture_status");
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const j = await r.json();
+          capStatus.textContent = j.running ? "Capturing…" : "Stopped";
+          return j.running;
+        } catch (e) {
+          capStatus.textContent = "Status error";
+          console.error(e);
+          return false;
+        }
+      }
+
+      // ---------- Level meter helpers (smoothed + dB) ----------
+      let smoothedRms = 0;
+      const SMOOTH_ALPHA = 0.3; // higher = snappier, lower = smoother
+
+      function rmsToDb(rms) {
+        const eps = 1e-8;
+        return 20 * Math.log10(Math.max(rms, eps));
+      }
+
+      function rmsToPercent(rms) {
+        const db = rmsToDb(rms);
+        const minDb = -60, maxDb = 0;
+        const pct = ((db - minDb) / (maxDb - minDb)) * 100;
+        return Math.max(0, Math.min(100, pct));
+      }
+
+      function updateLevelUI(rms, running) {
+        const bar = document.getElementById("levelBar");
+        const label = document.getElementById("levelLabel");
+        // Exponential moving average smoothing
+        smoothedRms = SMOOTH_ALPHA * rms + (1 - SMOOTH_ALPHA) * smoothedRms;
+
+        const pct = rmsToPercent(smoothedRms);
+        const db = rmsToDb(smoothedRms);
+
+        bar.style.width = `${pct.toFixed(0)}%`;
+        label.textContent = running
+          ? `Level: ${smoothedRms.toFixed(4)} (${pct.toFixed(0)}%) | ~dB: ${db.toFixed(1)}`
+          : "Level: stopped | ~dB: —";
+      }
+
+      let levelTimer = null;
+      async function pollLevelOnce() {
+        const r = await fetch("http://127.0.0.1:8000/level");
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        updateLevelUI(j.rms || 0, !!j.running);
+      }
+      function startLevelPolling() {
+        if (levelTimer) return;
+        pollLevelOnce().catch(() => {});
+        levelTimer = setInterval(() => { pollLevelOnce().catch(() => {}); }, 200);
+      }
+      function stopLevelPolling() {
+        if (levelTimer) {
+          clearInterval(levelTimer);
+          levelTimer = null;
+        }
+        updateLevelUI(0, false);
+      }
+
+      // ---------- VAD UI + log ----------
+      const vadLabel = document.getElementById('vadLabel');
+      const vadDot = document.getElementById('vadDot');
+      const logBox = document.getElementById('speechLog');
+      const clearLogBtn = document.getElementById('clearLogBtn');
+
+      function setVadUI({ speech, running }) {
+        if (!running) {
+          vadDot.style.background = '#bbb';
+          vadLabel.textContent = 'Speech: (stopped)';
+          return;
+        }
+        if (speech) {
+          vadDot.style.background = '#26a269';
+          vadLabel.textContent = 'Speech: yes';
+        } else {
+          vadDot.style.background = '#c01c28';
+          vadLabel.textContent = 'Speech: no';
+        }
+      }
+
+      function logMsg(text) {
+        const at = new Date();
+        const ts = at.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const div = document.createElement('div');
+        div.textContent = `[${ts}] ${text}`;
+        if (logBox.firstElementChild && logBox.firstElementChild.tagName === 'EM') {
+          logBox.innerHTML = '';
+        }
+        logBox.appendChild(div);
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+
+      clearLogBtn.addEventListener('click', () => {
+        logBox.innerHTML = '<em>Cleared</em>';
+      });
+
+      let vadTimer = null;
+      let lastStableSpeech = null;
+
+      async function pollVadOnce() {
+        const ng = noiseGateInput.value || -40;
+        const vad = vadAggSelect.value || 3;
+
+        const r = await fetch(`http://127.0.0.1:8000/vad_check?ng=${encodeURIComponent(ng)}&vad=${encodeURIComponent(vad)}`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        setVadUI({ speech: !!j.speech, running: !!j.running });
+
+        if (j.running) {
+          if (lastStableSpeech === null) {
+            lastStableSpeech = !!j.speech;
+            if (lastStableSpeech) logMsg('Speech started');
+          } else if (!!j.speech !== lastStableSpeech) {
+            lastStableSpeech = !!j.speech;
+            logMsg(lastStableSpeech ? 'Speech started' : 'Speech ended');
+          }
+        } else {
+          lastStableSpeech = null;
+        }
+      }
+
+      function startVadPolling() {
+        if (vadTimer) return;
+        pollVadOnce().catch(() => {});
+        vadTimer = setInterval(() => { pollVadOnce().catch(() => {}); }, 200);
+      }
+
+      function stopVadPolling() {
+        if (vadTimer) {
+          clearInterval(vadTimer);
+          vadTimer = null;
+        }
+        setVadUI({ speech: false, running: false });
+        lastStableSpeech = null;
+      }
+
+      // ---------- Dump last 5s to WAV ----------
+      const dumpBtn = document.getElementById('dumpBtn');
+      const dumpStatus = document.getElementById('dumpStatus');
+
+      dumpBtn.addEventListener('click', async () => {
+        dumpStatus.textContent = 'Saving…';
+        try {
+          const res = await fetch('http://127.0.0.1:8000/dump_wav?seconds=5');
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.message || 'Unknown error');
+          dumpStatus.textContent = 'Saved: ' + data.filename;
+          if (window.api?.revealPath) {
+            const r = await window.api.revealPath(data.path);
+            if (!r?.ok) console.warn('revealPath failed:', r?.error);
+          }
+        } catch (e) {
+          console.error(e);
+          dumpStatus.textContent = 'Save failed: ' + e.message;
+        }
+      });
+
+      // ---------- Echo IPC demo ----------
       const echoInput = document.getElementById("echoInput");
       const echoBtn = document.getElementById("echoBtn");
       const echoOut = document.getElementById("echoOut");
@@ -58,14 +397,59 @@
         try {
           const msg = echoInput.value || "hello";
           const res = await window.api.echo(msg);
-          // Expecting { echo: "..." }
-          echoOut.textContent = res && typeof res.echo !== "undefined"
-            ? String(res.echo)
-            : JSON.stringify(res);
+          echoOut.textContent =
+            res && typeof res.echo !== "undefined" ? String(res.echo) : JSON.stringify(res);
         } catch (e) {
           echoOut.textContent = "error";
           console.error(e);
         }
+      });
+
+      // ---------- Boot sequence ----------
+      (async function boot() {
+        loadPreferences();                  // <-- ensure saved values populate inputs
+        const online = await waitForWorkerOnline();
+        if (online) {
+          await loadDevicesWithRetry();
+          await refreshCaptureStatus();
+        } else {
+          deviceHelp.textContent = "Worker not ready. Try Refresh devices.";
+        }
+      })();
+
+      // Hook start/stop to polling + backend
+      startBtn.addEventListener("click", async () => {
+        capStatus.textContent = "Starting…";
+        try {
+          const body = {
+            playback_id: Number(playbackSelect.value || 0),
+            mic_id: Number(micSelect.value || 0),
+            samplerate: 48000
+          };
+          const r = await fetch("http://127.0.0.1:8000/start_capture", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          await r.json();
+          await refreshCaptureStatus();
+          startLevelPolling();
+          startVadPolling();
+        } catch (e) {
+          capStatus.textContent = "Start error";
+          console.error(e);
+        }
+      });
+
+      stopBtn.addEventListener("click", async () => {
+        capStatus.textContent = "Stopping…";
+        try {
+          await fetch("http://127.0.0.1:8000/stop_capture", { method: "POST" });
+        } catch {}
+        stopLevelPolling();
+        stopVadPolling();
+        await refreshCaptureStatus();
       });
     </script>
   </body>

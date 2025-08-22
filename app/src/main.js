@@ -2,7 +2,7 @@ const { spawn } = require('child_process')
 const path = require('path')
 
 // 1. Import the app (controls app lifecycle) and BrowserWindow (creates windows)
-const { app, BrowserWindow, ipcMain} = require('electron')
+const { app, BrowserWindow, ipcMain, shell } = require('electron')
 let workerProc = null
 
 function startWorker() {
@@ -60,6 +60,18 @@ ipcMain.handle('echo', async (_event, msg) => {
     return data
   } catch (err) {
     return { error: err.message }
+  }
+})
+
+ipcMain.handle('reveal-path', async (_evt, absPath) => {
+  if (!absPath || typeof absPath !== 'string') return { ok: false, error: 'bad path' }
+  try {
+    // Show the file in Finder (macOS) / Explorer (Windows)
+    shell.showItemInFolder(absPath)
+    // Alternatively: await shell.openPath(absPath)  // opens the file directly
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
   }
 })
 

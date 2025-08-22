@@ -2,5 +2,6 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('api', {
-  echo: (msg) => ipcRenderer.invoke('echo', msg)
+  echo: (msg) => ipcRenderer.invoke('echo', msg),
+  revealPath: (absPath) => ipcRenderer.invoke('reveal-path', absPath)
 })
