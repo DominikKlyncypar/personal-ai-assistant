@@ -17,6 +17,8 @@ import sounddevice as sd
 import webrtcvad
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
+from faster_whisper import WhisperModel
 
 # -----------------------------
 # FastAPI app
@@ -43,6 +45,25 @@ VAD_STATE = {
     "speech_frames": 0,
     "silence_frames": 0,
 }
+
+# -----------------------------
+# Whisper model (lazy singleton)
+# -----------------------------
+_WHISPER_MODEL = None
+
+def get_whisper_model():
+    """
+    Load faster-whisper lazily. Set model via env WHISPER_MODEL (e.g., 'base', 'small'),
+    default 'base'. Uses CPU by default; later we can switch to GPU on your mom's PC.
+    """
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is not None:
+        return _WHISPER_MODEL
+
+    model_name = os.environ.get("WHISPER_MODEL", "base")  # 'base', 'small', 'medium', etc.
+    # device='cpu' for now; change to 'cuda' + compute_type='float16' when GPU is available
+    _WHISPER_MODEL = WhisperModel(model_name, device="cpu", compute_type="int8")
+    return _WHISPER_MODEL
 
 # -----------------------------
 # Helpers (audio utils)
@@ -428,4 +449,48 @@ def vad_check(ng: float = -40.0, vad: int = 3):
         "rms": rms,
         "db": db,
         "running": running,
+    }
+
+@app.get("/transcribe_wav")
+def transcribe_wav(path: str, language: str | None = None, beam_size: int = 5):
+    """
+    Transcribe an existing WAV file with faster-whisper.
+    - path: either absolute path OR just a filename under worker/tmp/
+    - language: optional (e.g., 'en')
+    - beam_size: decoder beam size
+    """
+    p = Path(path)
+
+    # If just a filename was passed, resolve to worker/tmp
+    if not p.is_absolute():
+        p = Path(__file__).resolve().parent.parent / "tmp" / p
+
+    if not p.exists():
+        return {"ok": False, "error": f"File not found: {p}"}
+    if p.suffix.lower() != ".wav":
+        return {"ok": False, "error": "Only .wav supported"}
+
+    model = get_whisper_model()
+
+    segments, info = model.transcribe(
+        str(p),
+        language=language,
+        beam_size=int(beam_size),
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=300),
+    )
+
+    out = []
+    for seg in segments:
+        out.append({
+            "start": float(seg.start),
+            "end": float(seg.end),
+            "text": seg.text.strip(),
+        })
+
+    return {
+        "ok": True,
+        "language": info.language,
+        "duration": float(info.duration),
+        "segments": out,
     }
