@@ -1,156 +1,365 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <title>AI Assistant</title>
+    <!-- CSP for local dev: allow inline script and connect to local worker -->
+    <meta http-equiv="Content-Security-Policy"
+          content="
+            default-src 'self';
+            script-src 'self' 'unsafe-inline';
+            connect-src 'self' http://127.0.0.1:8000;
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data:;
+          ">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 20px; }
-      h1 { margin-bottom: 0.25rem; }
-      h2, h3 { margin-top: 1.25rem; }
-      label { display: inline-block; margin-top: 0.5rem; }
-      button { margin-left: 0.5rem; }
-      hr { margin: 1.25rem 0; }
-      #deviceHelp { font-size: 12px; color: #555; }
-      #levelMeter { width: 240px; height: 12px; background:#eee; border-radius:6px;
-                    box-shadow: inset 0 0 3px rgba(0,0,0,0.2); display:inline-block; vertical-align:middle; }
-      #levelBar { width: 0%; height: 100%; border-radius:6px;
-                  background: linear-gradient(90deg, #7fd, #0c9);
-                  transition: width 120ms linear; }
-      #speechLog { margin-top:6px; max-height:140px; overflow:auto; padding:8px;
-                   border:1px solid #ddd; border-radius:6px; background:#fafafa; font-size:12px; }
-      #vadDot { width:12px; height:12px; border-radius:50%; background:#bbb; box-shadow:0 0 2px rgba(0,0,0,0.3); }
+      :root{
+        --bg: #0b0c10;
+        --panel: #111218;
+        --panel-2:#0e1015;
+        --muted:#a9b1bb;
+        --text:#e8ecf1;
+        --brand:#6ee7ff;
+        --brand-2:#3fb4ff;
+        --ok:#26a269;
+        --bad:#c01c28;
+        --border: rgba(255,255,255,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.35);
+        --radius: 14px;
+      }
+      @media (prefers-color-scheme: light){
+        :root{
+          --bg:#f6f8fb;
+          --panel:#ffffff;
+          --panel-2:#fdfefe;
+          --muted:#54606e;
+          --text:#10131a;
+          --brand:#0ea5e9;
+          --brand-2:#2563eb;
+          --ok:#15803d;
+          --bad:#b91c1c;
+          --border: rgba(0,0,0,0.08);
+          --shadow: 0 8px 24px rgba(0,0,0,0.08);
+        }
+      }
+
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{
+        margin:0; padding:24px;
+        background: radial-gradient(1200px 800px at 10% -10%, rgba(110,231,255,0.08), transparent 40%),
+                    radial-gradient(900px 600px at 110% 10%, rgba(63,180,255,0.08), transparent 40%),
+                    var(--bg);
+        color:var(--text);
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial, sans-serif;
+      }
+
+      /* Layout */
+      .container{ max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      header{ grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+      .brand{ display:flex; align-items:center; gap:12px; letter-spacing:0.2px; }
+      .logo{
+        width:36px; height:36px; border-radius:10px;
+        background: conic-gradient(from 220deg, var(--brand), var(--brand-2), var(--brand));
+        box-shadow: 0 8px 18px rgba(63,180,255,0.35);
+      }
+      .subtle{color:var(--muted)}
+
+      .card{
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border:1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding:16px;
+        position: relative;
+        overflow: hidden;
+      }
+      .card h2, .card h3{margin:0 0 10px 0; font-size:16px}
+      .card::before{
+        content:""; position:absolute; inset: 0; pointer-events:none;
+        background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.00)); opacity:.25;
+      }
+      .card:hover{
+        box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+        transform: translateY(-1px);
+        transition: transform .12s ease, box-shadow .2s ease;
+      }
+
+      .row{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+      .stack{display:flex; flex-direction:column; gap:8px}
+      .spaced{display:flex; align-items:center; justify-content:space-between; gap:12px}
+      .muted{color:var(--muted)}
+      .help{font-size:12px; color:var(--muted); margin-top:6px}
+
+      /* Inputs & buttons */
+      select, input[type="number"], input[type="text"], input[type="search"]{
+        background: transparent; color:var(--text);
+        border:1px solid var(--border);
+        border-radius:10px; padding:8px 10px; outline:none;
+      }
+      select:focus, input:focus{border-color: var(--brand)}
+      button{
+        appearance:none; border:1px solid var(--border); color:var(--text);
+        background: linear-gradient(180deg, #1a1d25, #0f1218);
+        border-radius: 12px; padding:8px 12px; cursor:pointer;
+        transition: transform .06s ease, border-color .2s ease, background .2s ease;
+      }
+      button:hover{transform: translateY(-1px); border-color: var(--brand)}
+      button:disabled{
+        opacity:.55; cursor:not-allowed; filter:saturate(.7);
+      }
+      .btn-primary{ background: linear-gradient(180deg, var(--brand), var(--brand-2)); color:#041018; border-color: transparent; font-weight:600; }
+      .btn-ghost{ background: transparent; }
+      .btn-icon { display:inline-flex; align-items:center; gap:8px; }
+      .btn-icon svg{ width:16px; height:16px; opacity:.9 }
+      .btn-primary.btn-icon svg{ opacity:.95 }
+      .status{
+        padding: 6px 10px; border-radius:999px; font-size:12px;
+        border:1px solid var(--border); background: rgba(255,255,255,0.03);
+      }
+
+      /* Meter + VAD */
+      #levelMeter{ width: 280px; height: 12px; background: rgba(255,255,255,0.06); border-radius: 999px; position:relative; overflow:hidden; border:1px solid var(--border);}
+      #levelBar{ width:0%; height:100%; background: linear-gradient(90deg, #7fd, #0c9); transition: width 120ms linear; }
+      #vadDot{ width:12px; height:12px; border-radius:999px; background:#bbb; box-shadow: inset 0 0 0 2px rgba(0,0,0,0.15); }
+      #speechLog, #transcriptBox{
+        max-height: 220px; overflow:auto; padding:10px;
+        border:1px solid var(--border); border-radius:12px; background: rgba(0,0,0,0.12);
+        line-height:1.35;
+      }
+      #speechLog em, #transcriptBox em{color:var(--muted)}
+      .utt { margin:4px 0; display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; }
+      .utt:hover{ background: rgba(255,255,255,0.04); }
+      .utt time { color:var(--muted); font-size:11px; margin-right:8px; min-width:92px; text-align:right; opacity:.75 }
+      .utt small { color:var(--muted); font-size:11px; margin-left:8px }
+
+      /* Confidence badge */
+      .badge { display:inline-block; padding:2px 10px; border-radius:999px; font-size:11px; border:1px solid var(--border); margin-left:8px; letter-spacing: .2px;}
+      .badge-hi   { background: rgba(38,162,105,0.17); color: var(--ok); }
+      .badge-mid  { background: rgba(234,179,8,0.17);  color: #eab308; }
+      .badge-low  { background: rgba(192,28,40,0.17);  color: var(--bad); }
+
+      /* Grid placement */
+      .col-span-2{grid-column: 1 / -1}
+      .devices{grid-column: 1 / -1}
+      .audio{grid-column: 1 / 2}
+      .vad{grid-column: 2 / 3}
+      .transcripts{grid-column: 1 / -1}
+
+      @media (max-width: 920px){
+        .container{grid-template-columns: 1fr}
+        .audio, .vad, .devices, .transcripts{grid-column: 1 / -1}
+      }
+
+      /* Toasts */
+      .toast{
+        min-width: 220px;
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border:1px solid var(--border);
+        border-radius: 12px;
+        padding:10px 12px;
+        box-shadow: var(--shadow);
+        color: var(--text);
+        animation: toastIn .18s ease-out forwards;
+      }
+      .toast.ok    { border-color: rgba(38,162,105,.35); }
+      .toast.warn  { border-color: rgba(234,179,8,.35);  }
+      .toast.error { border-color: rgba(192,28,40,.35); }
+      @keyframes toastIn { from{opacity:0; transform: translateY(6px)} to{opacity:1; transform: translateY(0)} }
+      @keyframes toastOut{ to{ opacity:0; transform: translateY(6px)} }
+
+      /* Respect reduced motion */
+      @media (prefers-reduced-motion: reduce){
+        *{ transition:none !important; animation:none !important }
+      }
+
+      /* Checkbox accent color */
+      input[type="checkbox"]{ width:16px; height:16px; accent-color: var(--brand-2); }
     </style>
   </head>
+
   <body>
-    <h1>AI Assistant</h1>
-    <p>If you can read this, your desktop app is working.</p>
+    <div class="container">
+      <!-- Header -->
+      <header>
+        <div class="brand">
+          <div class="logo"></div>
+          <div>
+            <div style="font-weight:700">AI Assistant</div>
+            <div class="subtle" style="font-size:12px">Desktop capture · Whisper · Notes</div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="pingBtn" class="btn-ghost">Ping Worker</button>
+          <span id="pingResult" class="status muted">—</span>
+        </div>
+      </header>
 
-    <!-- Worker health / ping -->
-    <h2>Worker Test</h2>
-    <button id="pingBtn">Ping Worker</button>
-    <p id="pingResult"></p>
+      <!-- Devices -->
+      <section class="card devices">
+        <h2>Audio Devices</h2>
+        <div class="row">
+          <label class="stack" style="min-width:260px">
+            <span class="muted">Playback (Speakers for loopback on Windows)</span>
+            <select id="playbackSelect"></select>
+          </label>
+          <label class="stack" style="min-width:260px">
+            <span class="muted">Microphone (optional)</span>
+            <select id="micSelect"></select>
+          </label>
+          <div class="row">
+            <button id="refreshDevices" class="btn-ghost btn-icon">
+              <!-- refresh icon -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/>
+              </svg>
+              Refresh
+            </button>
+          </div>
+          <span id="deviceHelp" class="help">—</span>
+        </div>
+      </section>
 
-    <!-- Device picker -->
-    <h2>Audio Devices</h2>
-    <label>
-      Playback (Speakers for loopback on Windows):
-      <select id="playbackSelect"></select>
-    </label>
-    <br />
-    <label>
-      Microphone (optional):
-      <select id="micSelect"></select>
-    </label>
-    <button id="refreshDevices">Refresh devices</button>
-    <p id="deviceHelp"></p>
+      <!-- Capture + Meter -->
+      <section class="card audio">
+        <div class="spaced">
+          <h2>Capture</h2>
+          <div class="row">
+            <button id="startBtn" class="btn-primary btn-icon">
+              <!-- play icon -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="6,4 20,12 6,20 6,4"></polygon>
+              </svg>
+              Start
+            </button>
+            <button id="stopBtn" class="btn-ghost btn-icon">
+              <!-- stop icon -->
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              Stop
+            </button>
+            <span id="capStatus" class="status muted">Stopped</span>
+          </div>
+        </div>
 
-    <!-- Start/Stop capture -->
-    <div style="margin-top: 10px;">
-      <button id="startBtn">Start Capture</button>
-      <button id="stopBtn">Stop Capture</button>
-      <span id="capStatus" style="margin-left:8px;"></span>
+        <div class="row" style="margin-top:10px">
+          <div id="levelMeter"><div id="levelBar"></div></div>
+          <span id="levelLabel" class="muted">Level: (waiting) | ~dB: —</span>
+        </div>
+
+        <div class="row" style="margin-top:12px">
+          <button id="dumpBtn" class="btn-ghost">Save last 5s to WAV</button>
+          <span id="dumpStatus" class="muted"></span>
+
+          <button id="manualTranscribeBtn" class="btn-ghost" style="margin-left:12px">Transcribe last 10s</button>
+          <span id="manualTrStatus" class="muted"></span>
+        </div>
+      </section>
+
+      <!-- VAD + Log + Preferences -->
+      <section class="card vad">
+        <h2>Voice Activity</h2>
+        <div class="row" style="margin-top:4px">
+          <div id="vadDot"></div>
+          <span id="vadLabel" class="muted">Speech: (idle)</span>
+        </div>
+
+        <div class="stack" style="margin-top:12px">
+          <strong>Speech events</strong>
+          <div class="row">
+            <button id="clearLogBtn" class="btn-ghost">Clear</button>
+          </div>
+          <div id="speechLog"><em>Waiting…</em></div>
+        </div>
+
+        <div class="stack" style="margin-top:14px">
+          <h3>Preferences</h3>
+          <div class="row">
+            <label class="row" style="gap:8px">
+              <span class="muted">Noise Gate (dB)</span>
+              <input type="number" id="noiseGateInput" step="1" style="width:80px" />
+            </label>
+            <label class="row" style="gap:8px">
+              <span class="muted">VAD Aggressiveness</span>
+              <select id="vadAggSelect">
+                <option value="0">0 (permissive)</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3 (strict)</option>
+              </select>
+            </label>
+            <label class="row" style="gap:8px">
+              <input type="checkbox" id="autoTrToggle" checked />
+              <span class="muted">Auto transcribe on speech end</span>
+            </label>
+          </div>
+          <span class="help">Values are saved locally and sent to the worker.</span>
+        </div>
+      </section>
+
+      <!-- Transcripts -->
+      <section class="card transcripts col-span-2">
+        <div class="spaced">
+          <h2>Transcripts</h2>
+          <div class="row">
+            <input id="echoInput" placeholder="echo test…" style="width:180px" />
+            <button id="echoBtn" class="btn-ghost">Send</button>
+            <span id="echoOut" class="status muted">—</span>
+          </div>
+        </div>
+        <div id="transcriptBox" style="margin-top:10px"><em>No transcripts yet.</em></div>
+      </section>
     </div>
 
-    <!-- Simple level meter -->
-    <div id="meterRow" style="margin-top:10px;">
-      <div id="levelMeter"><div id="levelBar"></div></div>
-      <span id="levelLabel" style="margin-left:8px; font-size:12px; color:#555;">
-        Level: (waiting) | ~dB: —
-      </span>
-    </div>
+    <!-- Toast host -->
+    <div id="toastHost" style="position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:9999;"></div>
 
-    <!-- VAD status -->
-    <div id="vadRow" style="margin-top:10px; display:flex; align-items:center; gap:8px;">
-      <div id="vadDot"></div>
-      <span id="vadLabel" style="font-size:12px; color:#555;">Speech: (idle)</span>
-    </div>
-
-    <!-- Speech event log -->
-    <div style="margin-top:12px;">
-      <strong>Speech events</strong>
-      <button id="clearLogBtn" style="margin-left:8px;">Clear</button>
-      <div id="speechLog"><em>Waiting…</em></div>
-    </div>
-
-    <div style="margin-top:10px;">
-      <button id="dumpBtn">Save last 5s to WAV</button>
-      <span id="dumpStatus" style="margin-left:8px; font-size:12px; color:#555;"></span>
-    </div>
-
-    <!-- Preferences -->
-    <h3 style="margin-top:18px;">Preferences</h3>
-    <div style="margin-bottom:8px;">
-      <label>
-        Noise Gate (dB):
-        <input type="number" id="noiseGateInput" step="1" style="width:60px;" />
-      </label>
-    </div>
-    <div>
-      <label>
-        VAD Aggressiveness:
-        <select id="vadAggSelect">
-          <option value="0">0 (most permissive)</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3 (most strict)</option>
-        </select>
-      </label>
-    </div>
-    <p style="font-size:12px; color:#555;">
-      These values are saved in your browser (localStorage) and sent to the worker.
-    </p>
-
-    <hr />
-
-    <!-- Echo IPC demo -->
-    <h3>Echo test (Renderer → Main → Worker)</h3>
-    <input id="echoInput" placeholder="type something" />
-    <button id="echoBtn">Send</button>
-    <span id="echoOut"></span>
-
+    <!-- ========================= JS (keep IDs stable) ========================= -->
     <script>
       // ---------- Small helpers ----------
       const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+      function toast(msg, kind='ok', ms=2400){
+        const host = document.getElementById('toastHost');
+        const div = document.createElement('div');
+        div.className = `toast ${kind}`;
+        div.textContent = msg;
+        host.appendChild(div);
+        setTimeout(()=>{
+          div.style.animation = 'toastOut .15s ease-in forwards';
+          setTimeout(()=>host.removeChild(div), 180);
+        }, ms);
+      }
 
       // ---------- Preferences ----------
       const noiseGateInput = document.getElementById('noiseGateInput');
       const vadAggSelect   = document.getElementById('vadAggSelect');
+      const autoTrToggle   = document.getElementById('autoTrToggle');
 
       function loadPreferences() {
         let ng = localStorage.getItem('noiseGateDb');
         let vad = localStorage.getItem('vadAgg');
+        let autoTr = localStorage.getItem('autoTr') ?? '1'; // default ON
 
-        if (ng === null || ng === '') {
-          ng = '-40'; // default
-          localStorage.setItem('noiseGateDb', ng);
-        }
-        if (vad === null || vad === '') {
-          vad = '3';  // default strict
-          localStorage.setItem('vadAgg', vad);
-        }
+        if (ng === null || ng === '') { ng = '-40'; localStorage.setItem('noiseGateDb', ng); }
+        if (vad === null || vad === '') { vad = '3'; localStorage.setItem('vadAgg', vad); }
 
         noiseGateInput.value = ng;
         vadAggSelect.value = vad;
+        autoTrToggle.checked = autoTr === '1';
       }
+      noiseGateInput.addEventListener('change', () => localStorage.setItem('noiseGateDb', noiseGateInput.value));
+      vadAggSelect.addEventListener('change', () => localStorage.setItem('vadAgg', vadAggSelect.value));
+      autoTrToggle.addEventListener('change', () => localStorage.setItem('autoTr', autoTrToggle.checked ? '1' : '0'));
 
-      noiseGateInput.addEventListener('change', () => {
-        localStorage.setItem('noiseGateDb', noiseGateInput.value);
-      });
-      vadAggSelect.addEventListener('change', () => {
-        localStorage.setItem('vadAgg', vadAggSelect.value);
-      });
-
-      // ---------- Worker health (with retry) ----------
+      // ---------- Worker health ----------
       const pingBtn = document.getElementById("pingBtn");
       const pingResult = document.getElementById("pingResult");
-
       async function checkHealthOnce() {
         const res = await fetch("http://127.0.0.1:8000/health");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         return data?.status === "ok";
       }
-
       async function waitForWorkerOnline({ tries = 20, delayMs = 250 } = {}) {
         for (let i = 0; i < tries; i++) {
           try { if (await checkHealthOnce()) return true; } catch (_) {}
@@ -158,7 +367,6 @@
         }
         return false;
       }
-
       pingBtn.addEventListener("click", async () => {
         pingResult.textContent = "Pinging…";
         try {
@@ -197,11 +405,9 @@
           micSelect.appendChild(opt);
         }
 
-        if (data.os === "Windows_NT" || data.os === "Windows") {
-          deviceHelp.textContent = "Tip: choose your Speakers (WASAPI) for loopback capture. Mic is optional.";
-        } else {
-          deviceHelp.textContent = "You’re on macOS: loopback capture is a Windows feature. The picker will work on your mom’s PC.";
-        }
+        deviceHelp.textContent = (data.os === "Windows_NT" || data.os === "Windows")
+          ? "Tip: choose your Speakers (WASAPI) for loopback capture. Mic is optional."
+          : "On macOS, loopback requires a virtual device. Mic works for development.";
       }
 
       async function loadDevicesWithRetry({ tries = 5, delayMs = 500 } = {}) {
@@ -215,13 +421,25 @@
           }
         }
       }
-
       refreshBtn.addEventListener("click", () => loadDevicesWithRetry());
 
-      // ---------- Capture start/stop + status ----------
+      // ---------- Capture ----------
       const startBtn = document.getElementById("startBtn");
       const stopBtn  = document.getElementById("stopBtn");
       const capStatus = document.getElementById("capStatus");
+
+      function setRunButtons(running){
+        startBtn.disabled = running;
+        stopBtn.disabled  = !running;
+        startBtn.style.opacity = running ? .55 : 1;
+        stopBtn.style.opacity  = !running ? .55 : 1;
+        startBtn.style.cursor  = running ? 'not-allowed' : 'pointer';
+        stopBtn.style.cursor   = !running ? 'not-allowed' : 'pointer';
+      }
+      function styleCapStatus(running){
+        const el = document.getElementById('capStatus');
+        el.style.color = running ? 'var(--ok)' : 'var(--muted)';
+      }
 
       async function refreshCaptureStatus() {
         try {
@@ -229,6 +447,8 @@
           if (!r.ok) throw new Error("HTTP " + r.status);
           const j = await r.json();
           capStatus.textContent = j.running ? "Capturing…" : "Stopped";
+          setRunButtons(j.running);
+          styleCapStatus(j.running);
           return j.running;
         } catch (e) {
           capStatus.textContent = "Status error";
@@ -237,219 +457,234 @@
         }
       }
 
-      // ---------- Level meter helpers (smoothed + dB) ----------
-      let smoothedRms = 0;
-      const SMOOTH_ALPHA = 0.3; // higher = snappier, lower = smoother
-
-      function rmsToDb(rms) {
-        const eps = 1e-8;
-        return 20 * Math.log10(Math.max(rms, eps));
-      }
-
-      function rmsToPercent(rms) {
-        const db = rmsToDb(rms);
-        const minDb = -60, maxDb = 0;
-        const pct = ((db - minDb) / (maxDb - minDb)) * 100;
-        return Math.max(0, Math.min(100, pct));
-      }
-
-      function updateLevelUI(rms, running) {
-        const bar = document.getElementById("levelBar");
-        const label = document.getElementById("levelLabel");
-        // Exponential moving average smoothing
-        smoothedRms = SMOOTH_ALPHA * rms + (1 - SMOOTH_ALPHA) * smoothedRms;
-
-        const pct = rmsToPercent(smoothedRms);
-        const db = rmsToDb(smoothedRms);
-
+      // ---------- Level meter ----------
+      let smoothedRms = 0; const SMOOTH_ALPHA = 0.3;
+      function rmsToDb(r){ const eps=1e-8; return 20*Math.log10(Math.max(r,eps)); }
+      function rmsToPercent(r){ const db=rmsToDb(r), min=-60,max=0; return Math.max(0,Math.min(100,((db-min)/(max-min))*100)); }
+      function updateLevelUI(rms, running){
+        const bar=document.getElementById("levelBar"); const label=document.getElementById("levelLabel");
+        smoothedRms = SMOOTH_ALPHA*rms + (1-SMOOTH_ALPHA)*smoothedRms;
+        const pct = rmsToPercent(smoothedRms); const db = rmsToDb(smoothedRms);
         bar.style.width = `${pct.toFixed(0)}%`;
-        label.textContent = running
-          ? `Level: ${smoothedRms.toFixed(4)} (${pct.toFixed(0)}%) | ~dB: ${db.toFixed(1)}`
-          : "Level: stopped | ~dB: —";
+        label.textContent = running ? `Level: ${smoothedRms.toFixed(4)} (${pct.toFixed(0)}%) | ~dB: ${db.toFixed(1)}`
+                                    : "Level: stopped | ~dB: —";
       }
-
-      let levelTimer = null;
-      async function pollLevelOnce() {
-        const r = await fetch("http://127.0.0.1:8000/level");
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const j = await r.json();
-        updateLevelUI(j.rms || 0, !!j.running);
+      let levelTimer=null;
+      async function pollLevelOnce(){
+        const r=await fetch("http://127.0.0.1:8000/level");
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const j=await r.json();
+        updateLevelUI(j.rms||0, !!j.running);
       }
-      function startLevelPolling() {
-        if (levelTimer) return;
-        pollLevelOnce().catch(() => {});
-        levelTimer = setInterval(() => { pollLevelOnce().catch(() => {}); }, 200);
+      function startLevelPolling(){ if(levelTimer) return; pollLevelOnce().catch(()=>{}); levelTimer=setInterval(()=>{ pollLevelOnce().catch(()=>{}); },200); }
+      function stopLevelPolling(){ if(levelTimer){ clearInterval(levelTimer); levelTimer=null; } updateLevelUI(0,false); }
+
+      // ---------- VAD + log ----------
+      const vadLabel=document.getElementById('vadLabel');
+      const vadDot=document.getElementById('vadDot');
+      const logBox=document.getElementById('speechLog');
+      const clearLogBtn=document.getElementById('clearLogBtn');
+
+      function setVadUI({speech, running}){
+        if(!running){ vadDot.style.background='#bbb'; vadLabel.textContent='Speech: (stopped)'; return; }
+        if(speech){ vadDot.style.background='var(--ok)'; vadLabel.textContent='Speech: yes'; }
+        else { vadDot.style.background='var(--bad)'; vadLabel.textContent='Speech: no'; }
       }
-      function stopLevelPolling() {
-        if (levelTimer) {
-          clearInterval(levelTimer);
-          levelTimer = null;
-        }
-        updateLevelUI(0, false);
+      function logMsg(text){
+        const at=new Date(), ts=at.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const div=document.createElement('div'); div.textContent=`[${ts}] ${text}`;
+        if(logBox.firstElementChild && logBox.firstElementChild.tagName==='EM') logBox.innerHTML='';
+        logBox.appendChild(div); logBox.scrollTop=logBox.scrollHeight;
       }
+      clearLogBtn.addEventListener('click', ()=>{ logBox.innerHTML='<em>Cleared</em>'; });
 
-      // ---------- VAD UI + log ----------
-      const vadLabel = document.getElementById('vadLabel');
-      const vadDot = document.getElementById('vadDot');
-      const logBox = document.getElementById('speechLog');
-      const clearLogBtn = document.getElementById('clearLogBtn');
+      let vadTimer=null, lastStableSpeech=null;
+      let autoTrCooldown = false;   // prevents re-triggering immediately
+      let autoTrBusy = false;       // prevents concurrent runs
 
-      function setVadUI({ speech, running }) {
-        if (!running) {
-          vadDot.style.background = '#bbb';
-          vadLabel.textContent = 'Speech: (stopped)';
-          return;
-        }
-        if (speech) {
-          vadDot.style.background = '#26a269';
-          vadLabel.textContent = 'Speech: yes';
-        } else {
-          vadDot.style.background = '#c01c28';
-          vadLabel.textContent = 'Speech: no';
-        }
-      }
+      async function pollVadOnce(){
+        const ng=noiseGateInput.value||-40, vad=vadAggSelect.value||3;
+        const r=await fetch(`http://127.0.0.1:8000/vad_check?ng=${encodeURIComponent(ng)}&vad=${encodeURIComponent(vad)}`);
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const j=await r.json();
+        setVadUI({speech:!!j.speech, running:!!j.running});
+        if(j.running){
+          if(lastStableSpeech===null){
+            lastStableSpeech=!!j.speech;
+            if(lastStableSpeech) logMsg('Speech started');
+          } else if(!!j.speech!==lastStableSpeech){
+            // Transition happened
+            lastStableSpeech=!!j.speech;
+            logMsg(lastStableSpeech?'Speech started':'Speech ended');
 
-      function logMsg(text) {
-        const at = new Date();
-        const ts = at.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
-        const div = document.createElement('div');
-        div.textContent = `[${ts}] ${text}`;
-        if (logBox.firstElementChild && logBox.firstElementChild.tagName === 'EM') {
-          logBox.innerHTML = '';
-        }
-        logBox.appendChild(div);
-        logBox.scrollTop = logBox.scrollHeight;
-      }
-
-      clearLogBtn.addEventListener('click', () => {
-        logBox.innerHTML = '<em>Cleared</em>';
-      });
-
-      let vadTimer = null;
-      let lastStableSpeech = null;
-
-      async function pollVadOnce() {
-        const ng = noiseGateInput.value || -40;
-        const vad = vadAggSelect.value || 3;
-
-        const r = await fetch(`http://127.0.0.1:8000/vad_check?ng=${encodeURIComponent(ng)}&vad=${encodeURIComponent(vad)}`);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const j = await r.json();
-        setVadUI({ speech: !!j.speech, running: !!j.running });
-
-        if (j.running) {
-          if (lastStableSpeech === null) {
-            lastStableSpeech = !!j.speech;
-            if (lastStableSpeech) logMsg('Speech started');
-          } else if (!!j.speech !== lastStableSpeech) {
-            lastStableSpeech = !!j.speech;
-            logMsg(lastStableSpeech ? 'Speech started' : 'Speech ended');
+            // Auto-transcribe on speech end
+            if(!lastStableSpeech && autoTrToggle.checked){
+              autoTranscribeLast(10); // change window length if desired
+            }
           }
         } else {
-          lastStableSpeech = null;
+          lastStableSpeech=null;
         }
       }
+      function startVadPolling(){ if(vadTimer) return; pollVadOnce().catch(()=>{}); vadTimer=setInterval(()=>{ pollVadOnce().catch(()=>{}); },200); }
+      function stopVadPolling(){ if(vadTimer){ clearInterval(vadTimer); vadTimer=null; } setVadUI({speech:false, running:false}); lastStableSpeech=null; }
 
-      function startVadPolling() {
-        if (vadTimer) return;
-        pollVadOnce().catch(() => {});
-        vadTimer = setInterval(() => { pollVadOnce().catch(() => {}); }, 200);
+      // ---------- Transcripts (poll /transcripts) ----------
+      const transcriptBox=document.getElementById('transcriptBox');
+      let sinceId=0, trTimer=null;
+
+      function confBadge(conf) {
+        if (typeof conf !== 'number') return null;
+        let cls = 'badge-mid';
+        if (conf >= 0.75) cls = 'badge-hi';
+        else if (conf < 0.5) cls = 'badge-low';
+        const b = document.createElement('span');
+        b.className = `badge ${cls}`;
+        b.textContent = `conf ${(conf*100).toFixed(0)}%`;
+        return b;
       }
 
-      function stopVadPolling() {
-        if (vadTimer) {
-          clearInterval(vadTimer);
-          vadTimer = null;
+      function appendTranscriptItem(t){
+        const div=document.createElement('div'); div.className='utt';
+        const tm=document.createElement('time'); tm.textContent=`[${t.ts_iso}]`;
+        const span=document.createElement('span'); span.textContent=t.text;
+        const meta=document.createElement('small'); meta.textContent=`(${t.filename})`;
+        div.appendChild(tm);
+        div.appendChild(span);
+        const b = confBadge(t.confidence);
+        if (b) div.appendChild(b);
+        div.appendChild(meta);
+        if (transcriptBox.firstElementChild && transcriptBox.firstElementChild.tagName==='EM') transcriptBox.innerHTML='';
+        transcriptBox.appendChild(div); transcriptBox.scrollTop=transcriptBox.scrollHeight;
+      }
+      async function pollTranscriptsOnce(){
+        const r=await fetch(`http://127.0.0.1:8000/transcripts?since_id=${sinceId}`);
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        const j=await r.json();
+        if(Array.isArray(j.items)){
+          j.items.forEach(appendTranscriptItem);
+          sinceId=j.next_since_id||sinceId;
         }
-        setVadUI({ speech: false, running: false });
-        lastStableSpeech = null;
+      }
+      function startTranscriptPolling(){ if(trTimer) return; pollTranscriptsOnce().catch(()=>{}); trTimer=setInterval(()=>{ pollTranscriptsOnce().catch(()=>{}); },1000); }
+      function stopTranscriptPolling(){ if(trTimer){ clearInterval(trTimer); trTimer=null; } }
+
+      // ---------- Auto-transcribe helper ----------
+      async function autoTranscribeLast(seconds = 10){
+        if (autoTrBusy || autoTrCooldown) return;
+        autoTrBusy = true;
+        try{
+          const r1 = await fetch(`http://127.0.0.1:8000/dump_wav?seconds=${seconds}&label=auto`);
+          if (!r1.ok) throw new Error('dump failed');
+          const j1 = await r1.json();
+          if (!j1.ok) throw new Error(j1.message || 'dump failed');
+
+          const r2 = await fetch(`http://127.0.0.1:8000/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en`);
+          if (!r2.ok) throw new Error('transcribe failed');
+
+          await r2.json();
+          await pollTranscriptsOnce();
+          toast(`Auto-transcribed ${j1.filename}`, 'ok');
+        } catch (e) {
+          console.error(e);
+          toast(`Auto-transcribe error: ${e.message}`, 'error');
+        } finally {
+          autoTrBusy = false;
+          autoTrCooldown = true;
+          setTimeout(()=>{ autoTrCooldown = false; }, 1200);
+        }
       }
 
       // ---------- Dump last 5s to WAV ----------
-      const dumpBtn = document.getElementById('dumpBtn');
-      const dumpStatus = document.getElementById('dumpStatus');
+      const dumpBtn=document.getElementById('dumpBtn');
+      const dumpStatus=document.getElementById('dumpStatus');
+      dumpBtn.addEventListener('click', async ()=>{
+        dumpStatus.textContent='Saving…';
+        try{
+          const res=await fetch('http://127.0.0.1:8000/dump_wav?seconds=5');
+          if(!res.ok) throw new Error('HTTP '+res.status);
+          const data=await res.json();
+          if(!data.ok) throw new Error(data.message||'Unknown error');
+          dumpStatus.textContent='Saved: '+data.filename;
+          if(window.api?.revealPath){ try{ await window.api.revealPath(data.path);}catch{} }
+          toast(`Saved ${data.filename}`, 'ok');
+        }catch(e){ dumpStatus.textContent='Save failed: '+e.message; toast(`Error: ${e.message}`, 'error'); }
+      });
 
-      dumpBtn.addEventListener('click', async () => {
-        dumpStatus.textContent = 'Saving…';
-        try {
-          const res = await fetch('http://127.0.0.1:8000/dump_wav?seconds=5');
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.message || 'Unknown error');
-          dumpStatus.textContent = 'Saved: ' + data.filename;
-          if (window.api?.revealPath) {
-            const r = await window.api.revealPath(data.path);
-            if (!r?.ok) console.warn('revealPath failed:', r?.error);
-          }
-        } catch (e) {
-          console.error(e);
-          dumpStatus.textContent = 'Save failed: ' + e.message;
-        }
+      // ---------- Manual transcribe ----------
+      const manualBtn=document.getElementById('manualTranscribeBtn');
+      const manualLabel=document.getElementById('manualTrStatus');
+      manualBtn.addEventListener('click', async ()=>{
+        manualLabel.textContent='Working…';
+        try{
+          const r1=await fetch('http://127.0.0.1:8000/dump_wav?seconds=10&label=manual'); if(!r1.ok) throw new Error('dump failed');
+          const j1=await r1.json(); if(!j1.ok) throw new Error(j1.message||'dump failed');
+          const r2=await fetch(`http://127.0.0.1:8000/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en`); if(!r2.ok) throw new Error('transcribe failed');
+          await r2.json(); // server appends to /transcripts
+          manualLabel.textContent=`Saved + transcribed: ${j1.filename}`;
+          toast(`Transcribed ${j1.filename}`, 'ok');
+          await pollTranscriptsOnce(); // fetch new items immediately
+        }catch(e){ console.error(e); manualLabel.textContent='Failed: '+e.message; toast(`Error: ${e.message}`, 'error'); }
       });
 
       // ---------- Echo IPC demo ----------
-      const echoInput = document.getElementById("echoInput");
-      const echoBtn = document.getElementById("echoBtn");
-      const echoOut = document.getElementById("echoOut");
-
-      echoBtn.addEventListener("click", async () => {
-        echoOut.textContent = "…";
-        try {
-          const msg = echoInput.value || "hello";
-          const res = await window.api.echo(msg);
-          echoOut.textContent =
-            res && typeof res.echo !== "undefined" ? String(res.echo) : JSON.stringify(res);
-        } catch (e) {
-          echoOut.textContent = "error";
-          console.error(e);
-        }
+      const echoInput=document.getElementById("echoInput");
+      const echoBtn=document.getElementById("echoBtn");
+      const echoOut=document.getElementById("echoOut");
+      echoBtn.addEventListener("click", async ()=>{
+        echoOut.textContent="…";
+        try{
+          const msg=echoInput.value||"hello";
+          const res=await window.api.echo(msg);
+          echoOut.textContent=(res&&typeof res.echo!=="undefined")?String(res.echo):JSON.stringify(res);
+        }catch{ echoOut.textContent="error"; }
       });
 
-      // ---------- Boot sequence ----------
-      (async function boot() {
-        loadPreferences();                  // <-- ensure saved values populate inputs
-        const online = await waitForWorkerOnline();
-        if (online) {
+      // ---------- Boot ----------
+      (async function boot(){
+        loadPreferences();
+        const online=await waitForWorkerOnline();
+        if(online){
           await loadDevicesWithRetry();
           await refreshCaptureStatus();
-        } else {
-          deviceHelp.textContent = "Worker not ready. Try Refresh devices.";
+          startTranscriptPolling();
+        }else{
+          deviceHelp.textContent="Worker not ready. Try Refresh devices.";
         }
       })();
 
       // Hook start/stop to polling + backend
-      startBtn.addEventListener("click", async () => {
-        capStatus.textContent = "Starting…";
-        try {
-          const body = {
-            playback_id: Number(playbackSelect.value || 0),
-            mic_id: Number(micSelect.value || 0),
-            samplerate: 48000
+      startBtn.addEventListener("click", async ()=>{
+        capStatus.textContent="Starting…";
+        try{
+          const body={
+            playback_id:Number(playbackSelect.value||0),
+            mic_id:Number(micSelect.value||0),
+            samplerate:48000
           };
-          const r = await fetch("http://127.0.0.1:8000/start_capture", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body)
+          const r=await fetch("http://127.0.0.1:8000/start_capture",{
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body:JSON.stringify(body)
           });
-          if (!r.ok) throw new Error("HTTP " + r.status);
+          if(!r.ok) throw new Error("HTTP "+r.status);
           await r.json();
-          await refreshCaptureStatus();
+          await refreshCaptureStatus(); // updates buttons + color
           startLevelPolling();
           startVadPolling();
-        } catch (e) {
-          capStatus.textContent = "Start error";
+        }catch(e){
+          capStatus.textContent="Start error";
           console.error(e);
+          toast(`Error: ${e.message}`, 'error');
         }
       });
 
-      stopBtn.addEventListener("click", async () => {
-        capStatus.textContent = "Stopping…";
-        try {
-          await fetch("http://127.0.0.1:8000/stop_capture", { method: "POST" });
-        } catch {}
+      stopBtn.addEventListener("click", async ()=>{
+        capStatus.textContent="Stopping…";
+        try{ await fetch("http://127.0.0.1:8000/stop_capture",{ method:"POST" }); }catch{}
         stopLevelPolling();
         stopVadPolling();
-        await refreshCaptureStatus();
+        await refreshCaptureStatus(); // updates buttons + color
       });
     </script>
   </body>
