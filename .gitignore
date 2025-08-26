@@ -14,3 +14,13 @@ build/
 
 # Ignore Python virtual environments
 worker/.venv/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+tmp/
+
+# Node
+node_modules/
+dist/
