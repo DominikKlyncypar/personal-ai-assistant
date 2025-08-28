@@ -1,6 +1,14 @@
 # worker/src/main.py
 from __future__ import annotations
 
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+from .db import (initialize_db, 
+                new_meeting, 
+                delete_meeting, 
+                insert_utterance, 
+                list_utterances_for_meeting)
+
 import os
 import time
 import wave
@@ -15,9 +23,12 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
+from pydantic import BaseModel, Field
+
+from src import db
 
 # -----------------------------
 # FastAPI app
@@ -31,12 +42,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+def _init_db_on_startup():
+    """
+    FastAPI startup event:
+    - Ensure database exists
+    - Ensure required tables are created
+    """
+    db.initialize_db()
+
 # -----------------------------
 # Global state
 # -----------------------------
 CAPTURE_STATE: Dict[str, Any] = {"running": False}
 VAD_SAMPLE_RATE = 16000
 VAD_FRAME_MS = 30
+CURRENT_MEETING_ID: Optional[int] = None
+ACTIVE_MEETING_ID: int | None = None  # for utterance inserts without meeting_id
 
 # VAD hysteresis state
 VAD_STATE = {
@@ -315,6 +337,27 @@ def _auto_dump_and_transcribe(seconds: int = AUTO_TRANSCRIBE_WINDOW_S, language:
         print(">>> Auto-transcribe error:", e)
 
 # -----------------------------
+# Data models
+# -----------------------------
+
+class NewMeetingRequest(BaseModel):
+    """
+    Request body for creating a new meeting.
+
+    Fields:
+      title: (optional) human-readable title. If empty/whitespace, defaults to "Untitled".
+    """
+    title: str = Field(default="Untitled", description="Meeting title shown in the UI/DB")
+
+class UtteranceIn(BaseModel):
+    meeting_id: int | None = None
+    text: str
+    start_ms: int | None = None
+    end_ms: int | None = None
+    confidence: float | None = None
+    filename: str | None = None
+
+# -----------------------------
 # Routes
 # -----------------------------
 @app.get("/health")
@@ -522,3 +565,135 @@ def clear_transcripts():
         TRANSCRIPTS.clear()
         NEXT_UTTER_ID = 1
     return {"ok": True}
+
+@app.get("/db_status")
+def db_status():
+    """
+    Debug endpoint to verify database health.
+
+    Returns:
+      - ok: whether DB query succeeded
+      - db_path: full path to the DB file
+      - exists: whether the file exists on disk
+      - tables: list of tables in the DB
+    """
+    from .db import get_conn, DB_PATH
+    import os
+    ok_path = os.path.exists(DB_PATH)
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;")
+        tables = [r[0] for r in cur.fetchall()]
+        conn.close()
+        return {"ok": True, "db_path": DB_PATH, "exists": ok_path, "tables": tables}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.post("/meeting/new")
+def create_meeting(req: NewMeetingRequest):
+    """Create a new meeting row in SQLite and return its ID."""
+    title = (req.title or "").strip() or "Untitled"
+    mid = db.new_meeting(title)
+    return {"ok": True, "meeting_id": mid, "title": title}
+
+@app.delete("/meeting/{meeting_id}")
+def api_meeting_delete(
+    meeting_id: int,
+    cascade: bool = Query(
+        default=True,
+        description="If true, also delete all utterances belonging to this meeting."
+    ),
+):
+    """Delete a meeting by ID."""
+    try:
+        deleted_meeting, deleted_utt = delete_meeting(meeting_id, cascade=cascade)
+    except ValueError as e:
+        # This happens when cascade=False and there are dependent utterances
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if deleted_meeting == 0:
+        # No such meeting
+        raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
+
+    return {
+        "ok": True,
+        "meeting_id": meeting_id,
+        "deleted_meeting": deleted_meeting,
+        "deleted_utterances": deleted_utt,
+        "cascade": cascade,
+    }
+
+@app.post("/utterance")
+def api_insert_utterance(u: UtteranceIn):
+    """
+    Insert a single utterance row.
+    - If meeting_id is omitted, use ACTIVE_MEETING_ID.
+    """
+    # Choose meeting id: request overrides active, else use active
+    meeting_id = u.meeting_id if u.meeting_id is not None else ACTIVE_MEETING_ID
+    if meeting_id is None:
+        raise HTTPException(status_code=400, detail="No meeting_id provided and no active meeting set")
+
+    try:
+        new_id = insert_utterance(
+            meeting_id=meeting_id,
+            text=u.text,
+            start_ms=u.start_ms,
+            end_ms=u.end_ms,
+            confidence=u.confidence,
+            filename=u.filename,
+        )
+        return {"ok": True, "id": new_id, "meeting_id": meeting_id}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to insert utterance: {e}")
+    
+@app.get("/utterances")
+def api_list_utterances(
+    meeting_id: int = Query(..., description="ID of the meeting to fetch utterances for"),
+    limit: int = Query(200, ge=1, le=1000, description="Max number of rows to return (newest first)"),
+):
+    """Return the most recent utterances for a given meeting."""
+    try:
+        items = list_utterances_for_meeting(meeting_id, limit=limit)
+        return {"items": items, "count": len(items)}
+    except Exception as e:
+        # If you want more granular errors, you can detect sqlite3.OperationalError, etc.
+        raise HTTPException(status_code=500, detail=f"Failed to fetch utterances: {e}")
+    
+@app.post("/meeting/start/{meeting_id}")
+def api_meeting_start(meeting_id: int):
+    """
+    Mark a meeting as 'active'. Subsequent utterance inserts can omit meeting_id.
+    """
+    # Validate the meeting exists (fall back to a quick DB check if you didn't create meeting_exists)
+    try:
+        if hasattr(__import__("src.db", fromlist=[""]), "meeting_exists"):
+            if not meeting_exists(meeting_id):
+                raise HTTPException(status_code=404, detail="Meeting not found")
+    except Exception:
+        # Minimal validation fallback: try to select it
+        import sqlite3
+        from .db import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM meetings WHERE id = ?", (meeting_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Meeting not found")
+
+    global ACTIVE_MEETING_ID
+    ACTIVE_MEETING_ID = meeting_id
+    return {"ok": True, "active_meeting_id": ACTIVE_MEETING_ID}
+
+
+@app.post("/meeting/stop")
+def api_meeting_stop():
+    """
+    Clear the active meeting.
+    """
+    global ACTIVE_MEETING_ID
+    ACTIVE_MEETING_ID = None
+    return {"ok": True, "active_meeting_id": ACTIVE_MEETING_ID}

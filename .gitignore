@@ -24,3 +24,6 @@ tmp/
 # Node
 node_modules/
 dist/
+
+# Ignore SQLite database
+*.db
