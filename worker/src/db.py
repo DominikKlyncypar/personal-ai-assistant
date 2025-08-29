@@ -27,6 +27,8 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
+get_conn = get_connection  # alias for brevity
+
 def initialize_db() -> None:
     """
     Create tables if they don't exist, using the latest schema.
@@ -196,3 +198,44 @@ def list_utterances_for_meeting(meeting_id: int, limit: int = 200) -> List[Dict[
                 }
             )
         return items
+
+def list_utterances_for_meeting_since(
+    meeting_id: int,
+    since_id: int = 0,
+    limit: int = 200,
+) -> List[Dict]:
+    """
+    Return utterances for a meeting *newer than* `since_id`.
+
+    Why:
+      - Enables delta fetching in the UI (only pull new rows).
+    Contract:
+      - Rows are returned in ASC order so the UI can simply append.
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, meeting_id, ts_iso, start_ms, end_ms, text, confidence, filename
+        FROM utterances
+        WHERE meeting_id = ?
+          AND id > ?
+        ORDER BY id ASC
+        LIMIT ?
+        """,
+        (meeting_id, since_id, limit),
+    )
+    rows = [
+        {
+            "id": r[0],
+            "meeting_id": r[1],
+            "ts_iso": r[2],
+            "start_ms": r[3],
+            "end_ms": r[4],
+            "text": r[5],
+            "confidence": r[6],
+            "filename": r[7],
+        }
+        for r in cur.fetchall()
+    ]
+    return rows

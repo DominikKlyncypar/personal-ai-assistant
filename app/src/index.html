@@ -209,7 +209,7 @@
       </header>
 
       <!-- =================================================================== -->
-      <!-- Meeting Controls (NEW in this version)                              -->
+      <!-- Meeting Controls                                                     -->
       <!-- Create → Start → Stop; we persist the active meeting id locally.    -->
       <!-- =================================================================== -->
       <section class="card" id="meetingCard" style="grid-column: 1 / -1">
@@ -385,6 +385,12 @@
         }, ms);
       }
 
+      /** Return an id from payload regardless of whether backend uses `id` or `meeting_id`. */
+      function getIdFlexible(obj){
+        if (!obj || typeof obj !== 'object') return null;
+        return obj.meeting_id ?? obj.id ?? null;
+      }
+
       // ---------------------------------------------------------------------
       // Preferences (noise gate / VAD / auto-transcribe)
       // Stored in localStorage so they persist across app launches.
@@ -444,7 +450,7 @@
       });
 
       // ---------------------------------------------------------------------
-      // Meeting state & helpers (NEW)
+      // Meeting state & helpers
       // We keep the active meeting id in localStorage so refreshes are safe.
       // Endpoints used:
       //   POST /meeting/new               body: {title}
@@ -453,13 +459,21 @@
       // ---------------------------------------------------------------------
       let activeMeetingId = null;
 
-      /** Save active id to memory + localStorage, refresh small status badge. */
+      function resetTranscriptViewFor(meetingId) {
+        sinceIdByMeeting[meetingId || 0] = 0;
+        transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
+      }
+      /** Save active id to memory + localStorage, refresh status, reset sinceId. */
       function saveActiveMeetingId(id) {
-        activeMeetingId = id;
-        if (id === null || typeof id === 'undefined') {
+        activeMeetingId = id ?? null;
+        if (activeMeetingId === null) {
           localStorage.removeItem('activeMeetingId');
         } else {
-          localStorage.setItem('activeMeetingId', String(id));
+          localStorage.setItem('activeMeetingId', String(activeMeetingId));
+          // reset delta state whenever the meeting changes
+          resetTranscriptViewFor(activeMeetingId);
+          // restart polling so we fetch for the new meeting immediately
+          restartTranscriptPolling();
         }
         updateMeetingStatusUI();
       }
@@ -505,9 +519,15 @@
           });
           if (!r.ok) throw new Error('HTTP '+r.status);
           const j = await r.json();
-          if (!j?.id) throw new Error('No id returned');
-          saveActiveMeetingId(j.id);     // Make it the current meeting in the UI
-          toast(`Created meeting #${j.id}`);
+          console.debug("[/meeting/new] response:", j);
+
+          // FLEXIBLE: accept either {meeting_id} or {id}
+          const id = getIdFlexible(j);
+          if (!j?.ok || !id) throw new Error('No id returned');
+
+          saveActiveMeetingId(id);     // Make it the current meeting in the UI
+          restartTranscriptPolling();  // refresh list for the (new) meeting
+          toast(`Created meeting #${id}`);
         } catch (e) {
           console.error(e);
           toast('Create failed: ' + e.message, 'error');
@@ -702,19 +722,18 @@
           lastStableSpeech=null;
         }
       }
-      function startVadPolling(){ if(vadTimer) return; pollVadOnce().catch(()=>{}); vadTimer=setInterval(()=>{ pollVadOnce().catch(()=>{}); },200); }
+      function startVadPolling(){ if(vadTimer) return; pollVadOnce().catch(()=>{}); vadTimer=setInterval(()=>{ pollVadOnce().catch(()=>{}); },100); }
       function stopVadPolling(){ if(vadTimer){ clearInterval(vadTimer); vadTimer=null; } setVadUI({speech:false, running:false}); lastStableSpeech=null; }
 
-      // ---------------------------------------------------------------------
-      // Transcripts (MEETING-AWARE)
-      // We fetch utterances for the active meeting:
-      //   GET /utterances?meeting_id=ID&limit=200
-      // We render a fresh snapshot each time for simplicity (no since_id).
-      // ---------------------------------------------------------------------
-      const transcriptBox=document.getElementById('transcriptBox');
-      let trTimer=null;
+      // ----- Transcripts (MEETING-AWARE) — adaptive polling to reduce spam -----
+      const transcriptBox = document.getElementById('transcriptBox');
+      const sinceIdByMeeting = Object.create(null);
+      let trTimer = null;
+      let pollMs = 1500;         // starts fast
+      let idleRounds = 0;        // if nothing new, we slow down
+      let lastRenderedIds = "";  // simple fingerprint to detect changes
 
-      /** Color-coded small badge for confidence. */
+      /** Small badge with color per confidence bucket. */
       function confBadge(conf) {
         if (typeof conf !== 'number') return null;
         let cls = 'badge-mid';
@@ -726,7 +745,7 @@
         return b;
       }
 
-      /** Render a single utterance row. */
+      /** Render a single utterance row (one line). */
       function appendTranscriptItem(t){
         const div=document.createElement('div'); div.className='utt';
         const tm=document.createElement('time'); tm.textContent=`[${t.ts_iso}]`;
@@ -736,25 +755,42 @@
         div.appendChild(span);
         const b = confBadge(t.confidence); if (b) div.appendChild(b);
         div.appendChild(meta);
-        if (transcriptBox.firstElementChild && transcriptBox.firstElementChild.tagName==='EM') transcriptBox.innerHTML='';
-        transcriptBox.appendChild(div); transcriptBox.scrollTop=transcriptBox.scrollHeight;
+        if (transcriptBox.firstElementChild && transcriptBox.firstElementChild.tagName==='EM') {
+          transcriptBox.innerHTML='';
+        }
+        transcriptBox.appendChild(div);
+        transcriptBox.scrollTop=transcriptBox.scrollHeight;
       }
 
-      /** Fetch latest utterances for the active meeting and render snapshot. */
+      /** Poll only new rows for the current meeting and append them. */
       async function pollTranscriptsOnce(){
-        if (!activeMeetingId) return; // nothing to show without a meeting
-        const r=await fetch(`http://127.0.0.1:8000/utterances?meeting_id=${activeMeetingId}&limit=200`);
-        if(!r.ok) throw new Error('HTTP '+r.status);
-        const j=await r.json();
-        // server returns newest-first; render oldest→newest for natural reading
-        const items = Array.isArray(j.items) ? j.items.slice().reverse() : [];
-        transcriptBox.innerHTML = items.length ? '' : '<em>No transcripts yet.</em>';
-        items.forEach(appendTranscriptItem);
-      }
-      function startTranscriptPolling(){ if(trTimer) return; pollTranscriptsOnce().catch(()=>{}); trTimer=setInterval(()=>{ pollTranscriptsOnce().catch(()=>{}); },1500); }
-      function stopTranscriptPolling(){ if(trTimer){ clearInterval(trTimer); trTimer=null; } }
-      function restartTranscriptPolling(){ stopTranscriptPolling(); startTranscriptPolling(); }
+        if (!activeMeetingId) return;
 
+        const currentSince = sinceIdByMeeting[activeMeetingId] ?? 0;
+        const r = await fetch(`http://127.0.0.1:8000/utterances?meeting_id=${activeMeetingId}&since_id=${currentSince}&limit=200`);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+
+        // Append new items (already ASC order)
+        if (Array.isArray(j.items) && j.items.length) {
+          j.items.forEach(appendTranscriptItem);
+        }
+
+        // Bump since_id so next poll is delta-only
+        if (typeof j.next_since_id === 'number') {
+          sinceIdByMeeting[activeMeetingId] = j.next_since_id;
+        }
+      }
+
+      function startTranscriptPolling(){
+        if (trTimer) return;
+        // grab an initial snapshot (since_id=0) if we just switched meetings
+        pollTranscriptsOnce().catch(()=>{});
+        trTimer = setInterval(()=>{ pollTranscriptsOnce().catch(()=>{}); }, 1500);
+      }
+      function stopTranscriptPolling(){ if (trTimer){ clearInterval(trTimer); trTimer = null; } }
+      function restartTranscriptPolling(){ stopTranscriptPolling(); startTranscriptPolling(); }
+      
       // ---------------------------------------------------------------------
       // Auto-transcribe helper
       // Simple 2-step: dump last N seconds → transcribe → refresh list
@@ -841,7 +877,7 @@
       // ---------------------------------------------------------------------
       (async function boot(){
         loadPreferences();
-        loadActiveMeetingId();                 // <-- new (meeting id from localStorage)
+        loadActiveMeetingId();                 // meeting id from localStorage
         const online=await waitForWorkerOnline();
         if(online){
           await loadDevicesWithRetry();
