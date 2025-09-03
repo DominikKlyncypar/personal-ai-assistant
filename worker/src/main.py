@@ -7,10 +7,15 @@ import time
 import wave
 import threading
 import warnings
+import io
+import tempfile
+import shutil
+import soundfile as sf
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
+import sqlite3
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
@@ -18,10 +23,11 @@ import difflib
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from faster_whisper import WhisperModel
 from pydantic import BaseModel, Field
+from sklearn.cluster import AgglomerativeClustering
 
 # Package-local DB helpers
 from . import db
@@ -30,6 +36,7 @@ from .db import (
     new_meeting,
     delete_meeting,
     insert_utterance,
+    get_connection
 )
 
 # -----------------------------
@@ -44,14 +51,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 @app.on_event("startup")
 def _init_db_on_startup():
     """
     Ensure DB file and tables exist.
     """
     initialize_db()
-
 
 # -----------------------------
 # Global state
@@ -62,7 +67,7 @@ CAPTURE_STATE: Dict[str, Any] = {"running": False}
 VAD_SAMPLE_RATE = 16000
 VAD_FRAME_MS = 20            # 20ms frames for WebRTC VAD
 START_THRESH_FRAMES = 2      # ~40ms to declare "speech started"
-HANGOVER_MS = 800            # keep speech active this long after last voiced frame
+HANGOVER_MS = 2500           # keep speech active this long after last voiced frame
 
 # Audio buffer/windowing
 BUFFER_SECONDS = 180         # keep up to 3 minutes of audio in RAM
@@ -99,6 +104,8 @@ LAST_TEXT_TS = 0.0
 DEDUP_WINDOW_S = 8.0
 SIM_THRESHOLD = 0.88
 
+# tmp dir
+TMP_DIR = (Path(__file__).resolve().parent.parent / "tmp").resolve()
 
 # -----------------------------
 # Helpers (audio utils)
@@ -114,19 +121,16 @@ def _resample_mono_f32(x: np.ndarray, src_hz: int, dst_hz: int) -> np.ndarray:
     y = np.interp(t_dst, t_src, x).astype(np.float32)
     return y
 
-
 def _f32_to_pcm16_bytes(x: np.ndarray) -> bytes:
     if x.size == 0:
         return b""
     x = np.clip(x, -1.0, 1.0)
     return (x * 32767.0).astype(np.int16).tobytes()
 
-
 def _safe_label(label: str) -> str:
     label = (label or "").strip().lower()
     label = re.sub(r"[^a-z0-9_-]+", "_", label)
     return label or "snapshot"
-
 
 def _write_wav(path: str, samplerate: int, mono_f32: np.ndarray) -> None:
     clipped = np.clip(mono_f32, -1.0, 1.0)
@@ -136,7 +140,6 @@ def _write_wav(path: str, samplerate: int, mono_f32: np.ndarray) -> None:
         wf.setsampwidth(2)
         wf.setframerate(int(samplerate))
         wf.writeframes(pcm16.tobytes())
-
 
 def _take_latest_samples(seconds: float) -> tuple[np.ndarray, int]:
     with _CAPTURE.lock:
@@ -150,9 +153,210 @@ def _take_latest_samples(seconds: float) -> tuple[np.ndarray, int]:
         mono = mono[-n:]
     return mono.astype(np.float32, copy=False), sr
 
+def _save_upload_to_tmp(upload: UploadFile) -> Path:
+    tmp_dir = _ensure_tmp_dir()
+    name = upload.filename or f"upload_{int(time.time())}.wav"
+    out_path = tmp_dir / name
+    with tempfile.NamedTemporaryFile(delete=False) as tf:
+        shutil.copyfileobj(upload.file, tf)
+        tmp_name = tf.name
+    shutil.move(tmp_name, out_path)
+    return out_path
+
+def _resolve_audio_path(filename: str | None) -> Path | None:
+    if not filename:
+        return None
+    p = Path(filename)
+    if not p.is_absolute():
+        p = TMP_DIR / filename
+    return p if p.exists() else None
+
+def _load_mono16k(path: Path, start_ms: int | None = None, end_ms: int | None = None) -> np.ndarray:
+    """
+    Load audio as float32 mono at 16k without librosa.
+    - Reads with soundfile
+    - Converts stereo->mono by averaging
+    - Resamples with _resample_mono_f32 if needed
+    - Optional crop by [start_ms, end_ms]
+    """
+    y, sr = sf.read(str(path), dtype="float32", always_2d=False)
+    if isinstance(y, np.ndarray) and y.ndim == 2:
+        y = y.mean(axis=1).astype(np.float32, copy=False)
+    elif not isinstance(y, np.ndarray):
+        y = np.asarray(y, dtype=np.float32)
+
+    if start_ms is not None or end_ms is not None:
+        n = y.shape[0]
+        s = int(max(0, (start_ms or 0) * sr / 1000))
+        e = int(min(n, (end_ms if end_ms is not None else (n * 1000 // sr)) * sr / 1000))
+        y = y[s:e] if e > s else np.zeros(0, dtype=np.float32)
+
+    if sr != 16000 and y.size:
+        y = _resample_mono_f32(y, sr, 16000)
+    return y.astype(np.float32, copy=False)
 
 # -----------------------------
-# Text normalize + similarity
+# Lightweight log-mel embeddings (no librosa/torch)
+# -----------------------------
+def _hz_to_mel(f: np.ndarray | float) -> np.ndarray | float:
+    return 2595.0 * np.log10(1.0 + np.asarray(f) / 700.0)
+
+def _mel_to_hz(m: np.ndarray | float) -> np.ndarray | float:
+    return 700.0 * (10.0 ** (np.asarray(m) / 2595.0) - 1.0)
+
+def _mel_filterbank(n_fft: int, sr: int, n_mels: int = 40, fmin: float = 20.0, fmax: float | None = None) -> np.ndarray:
+    fmax = fmax or (sr / 2.0)
+    mels = np.linspace(_hz_to_mel(fmin), _hz_to_mel(fmax), n_mels + 2)
+    hz = _mel_to_hz(mels)
+    bins = np.floor((n_fft + 1) * hz / sr).astype(int)
+
+    fb = np.zeros((n_mels, n_fft // 2 + 1), dtype=np.float32)
+    for i in range(n_mels):
+        left, center, right = bins[i], bins[i + 1], bins[i + 2]
+        if center == left:   # guard
+            center += 1
+        if right == center:  # guard
+            right += 1
+        # Rising slope
+        fb[i, left:center] = (np.arange(left, center) - left) / max(1, (center - left))
+        # Falling slope
+        fb[i, center:right] = (right - np.arange(center, right)) / max(1, (right - center))
+    return fb
+
+def _stft_mag(y: np.ndarray, sr: int, win_length: int = 400, hop_length: int = 160, n_fft: int = 512) -> np.ndarray:
+    """
+    Basic STFT magnitude using NumPy (Hann window).
+    win_length=25ms (400 at 16k), hop=10ms (160 at 16k) by default.
+    Returns shape (n_fft//2+1, frames).
+    """
+    if y.size == 0:
+        return np.zeros((n_fft // 2 + 1, 0), dtype=np.float32)
+
+    y = y.astype(np.float32, copy=False)
+    window = np.hanning(win_length).astype(np.float32)
+    n_frames = 1 + max(0, (y.shape[0] - win_length) // hop_length)
+    if n_frames <= 0:
+        return np.zeros((n_fft // 2 + 1, 0), dtype=np.float32)
+
+    frames = np.lib.stride_tricks.as_strided(
+        y,
+        shape=(n_frames, win_length),
+        strides=(y.strides[0] * hop_length, y.strides[0]),
+        writeable=False,
+    )
+    frames = frames * window[None, :]
+
+    # Zero-pad to n_fft then rfft
+    if win_length < n_fft:
+        pad = np.zeros((n_frames, n_fft - win_length), dtype=np.float32)
+        frames = np.concatenate([frames, pad], axis=1)
+
+    spec = np.fft.rfft(frames, n=n_fft, axis=1)
+    mag = np.abs(spec).astype(np.float32).T  # (freq, frames)
+    return mag
+
+def _logmel(y: np.ndarray, sr: int = 16000, n_mels: int = 40, n_fft: int = 512, hop: int = 160, win: int = 400) -> np.ndarray:
+    """
+    Log-mel spectrogram: shape (n_mels, frames)
+    """
+    mag = _stft_mag(y, sr, win_length=win, hop_length=hop, n_fft=n_fft)  # (freq, T)
+    if mag.shape[1] == 0:
+        return np.zeros((n_mels, 0), dtype=np.float32)
+    power = (mag ** 2)
+    fb = _mel_filterbank(n_fft=n_fft, sr=sr, n_mels=n_mels)
+    mel = np.maximum(1e-10, fb @ power)  # (n_mels, T)
+    logmel = np.log(mel).astype(np.float32)
+    return logmel
+
+def _utterance_embedding(y: np.ndarray, sr: int = 16000, n_mels: int = 40) -> np.ndarray:
+    """
+    Simple robust embedding: mean+std over time of log-mel bands.
+    Returns vector of length 2*n_mels (float32).
+    """
+    if y.size < sr * 0.2:  # too short (<200ms)
+        return np.zeros(2 * n_mels, dtype=np.float32)
+    lm = _logmel(y, sr=sr, n_mels=n_mels)
+    if lm.shape[1] == 0:
+        return np.zeros(2 * n_mels, dtype=np.float32)
+    mu = lm.mean(axis=1)
+    sd = lm.std(axis=1)
+    emb = np.concatenate([mu, sd]).astype(np.float32)
+    # Normalize to unit length to help clustering
+    norm = float(np.linalg.norm(emb)) or 1.0
+    return (emb / norm).astype(np.float32)
+
+def _embed_utterances(utterances: List[Dict[str, Any]]) -> np.ndarray:
+    """
+    Returns (n_utt, emb_dim). Rows with missing/too-short audio fall back to zeros.
+    """
+    embs: List[np.ndarray] = []
+    for u in utterances:
+        path = _resolve_audio_path(u.get("filename"))
+        start_ms = u.get("start_ms")
+        end_ms = u.get("end_ms")
+        if path is None:
+            embs.append(np.zeros(80, dtype=np.float32))  # 2*n_mels (40*2)
+            continue
+        y = _load_mono16k(path, start_ms, end_ms)
+        emb = _utterance_embedding(y, sr=16000, n_mels=40)
+        embs.append(emb)
+    return np.vstack(embs) if embs else np.zeros((0, 80), dtype=np.float32)
+
+def _cluster_speakers(embs: np.ndarray, max_speakers: int | None = None, distance: float = 0.6) -> List[int]:
+    """
+    Cluster embeddings → cluster ids.
+    - If max_speakers is given (>0), fix n_clusters=max_speakers.
+    - Else, use distance threshold to discover K automatically.
+    """
+    if embs.shape[0] == 0:
+        return []
+    if np.allclose(embs, 0):
+        return [0] * embs.shape[0]  # nothing usable → single cluster
+
+    # sklearn >=1.2 prefers 'metric' but 'affinity' may exist; handle both.
+    try:
+        if max_speakers and max_speakers > 0:
+            model = AgglomerativeClustering(n_clusters=max_speakers, affinity="cosine", linkage="average")
+        else:
+            model = AgglomerativeClustering(distance_threshold=distance, n_clusters=None, affinity="cosine", linkage="average")
+    except TypeError:
+        if max_speakers and max_speakers > 0:
+            model = AgglomerativeClustering(n_clusters=max_speakers, metric="cosine", linkage="average")
+        else:
+            model = AgglomerativeClustering(distance_threshold=distance, n_clusters=None, metric="cosine", linkage="average")
+
+    labels = model.fit_predict(embs)
+    return labels.tolist()
+
+def _apply_cluster_labels(utterances: List[Dict[str, Any]], labels: List[int]) -> List[Dict[str, Any]]:
+    """
+    Map cluster ids to S1..Sk ordered by first occurrence in time.
+    """
+    if not utterances:
+        return []
+    first_seen: Dict[int, int] = {}
+    for i, cid in enumerate(labels):
+        if cid not in first_seen:
+            first_seen[cid] = i
+    cid_order = [cid for cid, _ in sorted(first_seen.items(), key=lambda kv: kv[1])]
+    cid_to_tag = {cid: f"S{idx+1}" for idx, cid in enumerate(cid_order)}
+
+    out: List[Dict[str, Any]] = []
+    for u, cid in zip(utterances, labels):
+        nu = dict(u)
+        nu["speaker"] = cid_to_tag.get(cid, f"S{cid+1}")
+        out.append(nu)
+    return out
+
+def _label_speakers_auto(utterances: List[Dict[str, Any]], max_speakers: int | None) -> List[Dict[str, Any]]:
+    # Ensure stable order for nicer S1..Sk mapping
+    rows = sorted(utterances, key=lambda r: (r.get("start_ms") or 0, r.get("id") or 0))
+    embs = _embed_utterances(rows)
+    labels = _cluster_speakers(embs, max_speakers=max_speakers)
+    return _apply_cluster_labels(rows, labels)
+
+# -----------------------------
+# Text normalize + similarity (for dedupe)
 # -----------------------------
 def _norm_text(s: str) -> str:
     s = s.lower().strip()
@@ -160,10 +364,8 @@ def _norm_text(s: str) -> str:
     s = re.sub(r"[^a-z0-9\s.,!?'\-]", "", s)
     return s
 
-
 def _similar(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
-
 
 # -----------------------------
 # Capture implementation
@@ -176,11 +378,9 @@ class _Capture:
         self.running: bool = False
         self.samplerate: int = 48000
         self.blocksize: int = max(128, int(self.samplerate * 0.01))
-        # Temporary; we resize in start_* based on BUFFER_SECONDS & blocksize
         self.buffer: deque[np.ndarray] = deque(maxlen=1500)
 
     def _resize_buffer(self):
-        # blocks per second ≈ samplerate / blocksize
         bps = max(1, int(round(self.samplerate / max(1, self.blocksize))))
         self.buffer = deque(maxlen=BUFFER_SECONDS * bps)
 
@@ -193,7 +393,7 @@ class _Capture:
         if self.running:
             return
         self.samplerate = samplerate
-        self.blocksize = max(128, int(samplerate * 0.01))  # ~10ms blocks for snappy VAD
+        self.blocksize = max(128, int(samplerate * 0.01))  # ~10ms
         self._resize_buffer()
         channels = 1
 
@@ -220,7 +420,7 @@ class _Capture:
         if platform.system() != "Windows":
             raise RuntimeError("Loopback capture requires Windows (WASAPI).")
         self.samplerate = samplerate
-        self.blocksize = max(256, int(samplerate * 0.02))  # ~20ms blocks
+        self.blocksize = max(256, int(samplerate * 0.02))  # ~20ms
         self._resize_buffer()
         channels = 2
         try:
@@ -255,21 +455,18 @@ class _Capture:
             self.stream = None
             self.running = False
             with self.lock:
-                self.last_rms = 0.0  # keep buffer so /dump_wav still works
+                self.last_rms = 0.0
 
     def get_level(self) -> float:
         with self.lock:
             return self.last_rms
 
-
 _CAPTURE = _Capture()
-
 
 # -----------------------------
 # Whisper (lazy loader)
 # -----------------------------
 _WHISPER_MODEL = None
-
 
 def get_whisper_model():
     global _WHISPER_MODEL
@@ -279,15 +476,12 @@ def get_whisper_model():
     _WHISPER_MODEL = WhisperModel(model_name, device="cpu", compute_type="int8")
     return _WHISPER_MODEL
 
-
 def _ensure_tmp_dir() -> Path:
     out_dir = Path(__file__).resolve().parent.parent / "tmp"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
-
 def _dump_last_seconds(seconds: int, label: str = "segment") -> Path | None:
-    # enforce sensible bounds
     seconds = int(max(1, min(seconds, BUFFER_SECONDS)))
     with _CAPTURE.lock:
         samplerate = _CAPTURE.samplerate
@@ -309,13 +503,7 @@ def _dump_last_seconds(seconds: int, label: str = "segment") -> Path | None:
     _write_wav(str(out), samplerate, buf)
     return out
 
-
 def _transcribe_file(path: Path, language: str | None = "en", beam_size: int = 8) -> Dict[str, Any]:
-    """
-    Stronger decoding config. Returns:
-      - segments: [{start, end, text}, ...]
-      - confidence: crude 0..1 from avg_logprob
-    """
     model = get_whisper_model()
     segments, info = model.transcribe(
         str(path),
@@ -343,12 +531,7 @@ def _transcribe_file(path: Path, language: str | None = "en", beam_size: int = 8
         conf = max(0.0, min(1.0, 1.0 + avg_lp))  # -1→0, 0→1
     return {"ok": True, "language": info.language, "duration": float(info.duration), "segments": out, "confidence": conf}
 
-
 def _append_transcript_and_db(filename: str, segs: List[Dict[str, Any]], confidence: float | None):
-    """
-    Append to in-memory (debug) AND insert into SQLite for CURRENT_MEETING_ID,
-    with near-duplicate dedupe.
-    """
     global NEXT_UTTER_ID, CURRENT_MEETING_ID, LAST_TEXT, LAST_TEXT_TS
 
     ts_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -359,7 +542,6 @@ def _append_transcript_and_db(filename: str, segs: List[Dict[str, Any]], confide
     norm_text = _norm_text(raw_text)
     now_s = time.monotonic()
 
-    # dedupe against very-similar recent insert
     if LAST_TEXT:
         sim = _similar(norm_text, LAST_TEXT)
         if sim >= SIM_THRESHOLD and (now_s - LAST_TEXT_TS) <= DEDUP_WINDOW_S:
@@ -369,7 +551,6 @@ def _append_transcript_and_db(filename: str, segs: List[Dict[str, Any]], confide
     start_ms = int(segs[0]["start"] * 1000) if segs and "start" in segs[0] else None
     end_ms = int(segs[-1]["end"] * 1000) if segs and "end" in segs[-1] else None
 
-    # 1) in-memory (debug)
     with TRANSCRIPTS_LOCK:
         TRANSCRIPTS.append({
             "id": NEXT_UTTER_ID,
@@ -382,7 +563,6 @@ def _append_transcript_and_db(filename: str, segs: List[Dict[str, Any]], confide
         })
         NEXT_UTTER_ID += 1
 
-    # 2) DB persist (only if meeting active)
     try:
         meeting_id = CURRENT_MEETING_ID
         if meeting_id is not None:
@@ -399,9 +579,7 @@ def _append_transcript_and_db(filename: str, segs: List[Dict[str, Any]], confide
     except Exception as e:
         print(f"[warn] DB insert failed for {filename}: {e}")
 
-
 def _auto_dump_and_transcribe(seconds: int = AUTO_TRANSCRIBE_WINDOW_S, language: str | None = None):
-    """Run in a background thread after 'speech ended' (debounced, re-entry safe)."""
     global AUTO_BUSY, LAST_TRIGGER_TS
     if AUTO_BUSY:
         return
@@ -411,9 +589,7 @@ def _auto_dump_and_transcribe(seconds: int = AUTO_TRANSCRIBE_WINDOW_S, language:
         if (now_m - LAST_TRIGGER_TS) < MIN_AUTO_GAP_S:
             return
 
-        # cap by BUFFER_SECONDS and AUTO_MAX_WINDOW_S
         seconds = int(max(1, min(seconds, AUTO_MAX_WINDOW_S, BUFFER_SECONDS)))
-
         wav_path = _dump_last_seconds(seconds, label="auto")
         if not wav_path:
             return
@@ -430,13 +606,78 @@ def _auto_dump_and_transcribe(seconds: int = AUTO_TRANSCRIBE_WINDOW_S, language:
         LAST_TRIGGER_TS = time.monotonic()
         AUTO_BUSY = False
 
+def _fetch_meeting_or_404(meeting_id: int):
+    try:
+        if hasattr(db, "meeting_exists"):
+            if not db.meeting_exists(meeting_id):
+                raise HTTPException(status_code=404, detail="Meeting not found")
+        else:
+            with db.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,))
+                if cur.fetchone() is None:
+                    raise HTTPException(status_code=404, detail="Meeting not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Validation error: {e}")
+
+def _get_meeting_meta(meeting_id: int) -> Dict[str, Any]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT id, title, created_at FROM meetings WHERE id = ?",
+                (meeting_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Meeting not found")
+            return {"id": row[0], "title": row[1], "created_at": row[2]}
+        except sqlite3.OperationalError:
+            cur.execute(
+                "SELECT id, title FROM meetings WHERE id = ?",
+                (meeting_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Meeting not found")
+            return {"id": row[0], "title": row[1], "created_at": None}
+
+def _get_meeting_utterances(meeting_id: int, limit: int | None = None) -> list[dict]:
+    with db.get_connection() as conn:
+        cur = conn.cursor()
+        sql = """
+        SELECT id, meeting_id, ts_iso, start_ms, end_ms, text, confidence, filename
+        FROM utterances
+        WHERE meeting_id = ?
+        ORDER BY id ASC
+        """
+        if limit:
+            sql += " LIMIT ?"
+            cur.execute(sql, (meeting_id, limit))
+        else:
+            cur.execute(sql, (meeting_id,))
+        rows = cur.fetchall()
+    items = []
+    for r in rows:
+        items.append({
+            "id": r[0],
+            "meeting_id": r[1],
+            "ts_iso": r[2],
+            "start_ms": r[3],
+            "end_ms": r[4],
+            "text": r[5],
+            "confidence": r[6],
+            "filename": r[7],
+        })
+    return items
 
 # -----------------------------
 # Data models
 # -----------------------------
 class NewMeetingRequest(BaseModel):
     title: str = Field(default="Untitled", description="Meeting title shown in the UI/DB")
-
 
 class UtteranceIn(BaseModel):
     meeting_id: int | None = None
@@ -446,10 +687,8 @@ class UtteranceIn(BaseModel):
     confidence: float | None = None
     filename: str | None = None
 
-
 class NewMeetingBody(BaseModel):
     title: str
-
 
 # -----------------------------
 # Routes
@@ -457,7 +696,6 @@ class NewMeetingBody(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
 
 @app.get("/devices")
 def list_devices():
@@ -491,7 +729,6 @@ def list_devices():
         "notes": "On Windows with WASAPI, choose an OUTPUT device for loopback capture. Mic is optional.",
     }
 
-
 @app.post("/start_capture")
 def start_capture(payload: Dict[str, Any]):
     playback_id = payload.get("playback_id", None)
@@ -523,7 +760,6 @@ def start_capture(payload: Dict[str, Any]):
         _CAPTURE.stop()
         return {"ok": False, "message": str(e), "running": False}
 
-
 @app.post("/stop_capture")
 def stop_capture():
     _CAPTURE.stop()
@@ -535,20 +771,83 @@ def stop_capture():
     VAD_STATE["segment_start_ts"] = None
     return {"ok": True, "message": "stopped", "running": False}
 
-
 @app.get("/capture_status")
 def capture_status():
     return {"running": bool(CAPTURE_STATE["running"])}
-
 
 @app.get("/level")
 def level():
     return {"running": bool(CAPTURE_STATE["running"]), "rms": float(_CAPTURE.get_level())}
 
+@app.get("/meeting/{meeting_id}/export.json")
+def export_meeting_json(
+    meeting_id: int,
+    speakers: str = Query("0", description="'0'|'heuristic'|'auto'"),
+    max_speakers: int | None = Query(None, ge=1, le=20),
+):
+    meta = _get_meeting_meta(meeting_id)
+    utterances = _get_meeting_utterances(meeting_id)
+
+    if speakers == "heuristic":
+        try:
+            utterances = _label_speakers(utterances)  # if you kept the old simple version
+        except NameError:
+            pass
+    elif speakers == "auto":
+        utterances = _label_speakers_auto(utterances, max_speakers)
+
+    return {"meeting": meta, "utterances": utterances}
+
+def _ms_to_mmss(ms: int | None) -> str:
+    if ms is None:
+        return "--:--"
+    s = max(0, int(ms // 1000))
+    return f"{s//60:02d}:{s%60:02d}"
+
+@app.get("/meeting/{meeting_id}/export.md")
+def export_meeting_markdown(
+    meeting_id: int,
+    speakers: str = Query("0", description="'0'|'heuristic'|'auto'"),
+    max_speakers: int | None = Query(None, ge=1, le=20),
+):
+    meta = _get_meeting_meta(meeting_id)
+    utterances = _get_meeting_utterances(meeting_id)
+
+    if speakers == "heuristic":
+        try:
+            utterances = _label_speakers(utterances)
+        except NameError:
+            pass
+    elif speakers == "auto":
+        utterances = _label_speakers_auto(utterances, max_speakers)
+
+    created = meta.get("created_at")
+    header_lines = [f"# Meeting {meta['id']}: {meta.get('title') or 'Untitled'}"]
+    if created:
+        header_lines.append(f"_Created: {created}_")
+    header_lines.append("")
+
+    lines: List[str] = []
+    for u in utterances:
+        ts = u.get("ts_iso") or ""
+        text = u.get("text") or ""
+        spk = u.get("speaker")
+        if spk:
+            lines.append(f"- **{spk}** [{ts}] {text}")
+        else:
+            lines.append(f"- [{ts}] {text}")
+    md = "\n".join(header_lines + lines) + "\n"
+    return md
+
+@app.get("/meeting/{meeting_id}/summary")
+def summarize_meeting(meeting_id: int, max_utterances: int = 200):
+    _fetch_meeting_or_404(meeting_id)
+    items = _get_meeting_utterances(meeting_id, limit=max_utterances)
+    text = "\n".join(f"- {it['text']}" for it in items if it.get("text"))
+    return {"meeting_id": meeting_id, "preview": text[:2000], "utterances_used": len(items)}
 
 @app.get("/dump_wav")
 def dump_wav(seconds: int = 5, label: str | None = None):
-    # allow bigger manual dumps, but never exceed buffer
     max_allowed = min(300, BUFFER_SECONDS)
     if seconds <= 0 or seconds > max_allowed:
         seconds = min(5, max_allowed)
@@ -580,7 +879,6 @@ def dump_wav(seconds: int = 5, label: str | None = None):
         "samples": int(buf.shape[0]),
     }
 
-
 @app.get("/transcribe_wav")
 def transcribe_wav(path: str, language: str | None = None, beam_size: int = 5):
     p = Path(path)
@@ -595,6 +893,46 @@ def transcribe_wav(path: str, language: str | None = None, beam_size: int = 5):
         _append_transcript_and_db(p.name, res["segments"], res.get("confidence"))
     return res
 
+@app.post("/transcribe_upload")
+def transcribe_upload(
+    file: UploadFile = File(...),
+    meeting_id: int | None = None,
+    language: str | None = None,
+    beam_size: int = 8,
+):
+    """
+    Upload an audio file (wav/mp3/m4a/etc), transcribe it, and persist as one utterance.
+    If meeting_id is omitted, uses CURRENT_MEETING_ID.
+    """
+    mid = meeting_id if meeting_id is not None else CURRENT_MEETING_ID
+    if mid is None:
+        raise HTTPException(status_code=400, detail="No meeting_id provided and no active meeting set")
+
+    try:
+        p = _save_upload_to_tmp(file)
+        if p.suffix.lower() != ".wav":
+            data, sr = sf.read(str(p))
+            wav_path = p.with_suffix(".wav")
+            sf.write(str(wav_path), data, sr)
+            p = wav_path
+
+        res = _transcribe_file(p, language=language, beam_size=beam_size)
+        if not (res.get("ok") and res.get("segments")):
+            return {"ok": False, "error": "No text produced"}
+
+        _append_transcript_and_db(p.name, res["segments"], res.get("confidence"))
+
+        full_text = " ".join(s["text"].strip() for s in res["segments"]).strip()
+        return {
+            "ok": True,
+            "meeting_id": mid,
+            "filename": p.name,
+            "segments": res["segments"],
+            "confidence": res.get("confidence"),
+            "text": full_text,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload/transcribe failed: {e}")
 
 @app.get("/vad_check")
 def vad_check(ng: float = -40.0, vad: int = 3):
@@ -652,7 +990,6 @@ def vad_check(ng: float = -40.0, vad: int = 3):
     if is_speech_frame:
         VAD_STATE["last_voice_ts"] = now
 
-    # frame-based counters (for START)
     if is_speech_frame:
         VAD_STATE["speech_frames"] += 1
         VAD_STATE["silence_frames"] = 0
@@ -663,25 +1000,21 @@ def vad_check(ng: float = -40.0, vad: int = 3):
     just_started = False
     just_ended = False
 
-    # START: fast
     if not VAD_STATE["speech_active"] and VAD_STATE["speech_frames"] >= START_THRESH_FRAMES:
         VAD_STATE["speech_active"] = True
         VAD_STATE["segment_start_ts"] = now
         just_started = True
         VAD_STATE["last_voice_ts"] = now
 
-    # END: hangover (time since last voiced frame)
     if VAD_STATE["speech_active"]:
         last_voice = VAD_STATE.get("last_voice_ts", now)
         ms_since_voice = (now - last_voice) * 1000.0
         if ms_since_voice >= HANGOVER_MS:
             VAD_STATE["speech_active"] = False
             just_ended = True
-            # Estimate the full segment length since it started
             seg_start = VAD_STATE.get("segment_start_ts") or now
             seg_len = int(max(1, min(AUTO_MAX_WINDOW_S, BUFFER_SECONDS, now - seg_start)))
             if AUTO_TRANSCRIBE:
-                # Debounced async transcribe of the *whole* segment
                 if (now - LAST_TRIGGER_TS) >= MIN_AUTO_GAP_S and not AUTO_BUSY:
                     threading.Thread(
                         target=_auto_dump_and_transcribe,
@@ -702,17 +1035,14 @@ def vad_check(ng: float = -40.0, vad: int = 3):
         "events": {"started": just_started, "ended": just_ended},
     }
 
-
 # -----------------------------
 # Legacy debug transcript APIs
 # -----------------------------
 @app.get("/transcripts")
 def get_transcripts(since_id: int = 0):
-    """Return all in-memory transcripts with id > since_id."""
     with TRANSCRIPTS_LOCK:
         rows = [t for t in TRANSCRIPTS if t["id"] > since_id]
     return {"ok": True, "items": rows, "next_since_id": (rows[-1]["id"] if rows else since_id)}
-
 
 @app.post("/transcripts/clear")
 def clear_transcripts():
@@ -722,16 +1052,12 @@ def clear_transcripts():
         NEXT_UTTER_ID = 1
     return {"ok": True}
 
-
 # -----------------------------
 # DB diagnostics
 # -----------------------------
 @app.get("/db_status")
 def db_status():
-    """
-    Debug endpoint to verify database health.
-    """
-    from .db import get_connection, DB_PATH
+    from .db import DB_PATH
     ok_path = os.path.exists(DB_PATH)
     try:
         with get_connection() as conn:
@@ -742,42 +1068,28 @@ def db_status():
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
-
 # -----------------------------
 # Meeting APIs
 # -----------------------------
 class NewMeetingBody(BaseModel):
     title: str
 
-
 @app.post("/meeting/new")
 def api_meeting_new(body: NewMeetingBody):
-    """
-    Create a meeting row and return its ID in the field 'meeting_id'
-    (the UI expects this exact key).
-    """
     mid = new_meeting(body.title)
     return {"ok": True, "meeting_id": mid, "title": body.title}
-
 
 @app.delete("/meeting/{meeting_id}")
 def api_meeting_delete(
     meeting_id: int,
-    cascade: bool = Query(
-        default=True,
-        description="If true, also delete all utterances belonging to this meeting."
-    ),
+    cascade: bool = Query(default=True, description="If true, also delete all utterances belonging to this meeting.")
 ):
-    """Delete a meeting by ID."""
     try:
         deleted_meeting, deleted_utt = delete_meeting(meeting_id, cascade=cascade)
     except ValueError as e:
-        # cascade=False and there are dependents
         raise HTTPException(status_code=400, detail=str(e))
-
     if deleted_meeting == 0:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
-
     return {
         "ok": True,
         "meeting_id": meeting_id,
@@ -786,19 +1098,13 @@ def api_meeting_delete(
         "cascade": cascade,
     }
 
-
 @app.post("/meeting/start/{meeting_id}")
 def api_meeting_start(meeting_id: int):
-    """
-    Mark a meeting as 'active'. Subsequent utterance inserts can omit meeting_id.
-    """
-    # Validate the meeting exists
     try:
         if hasattr(db, "meeting_exists"):
             if not db.meeting_exists(meeting_id):
                 raise HTTPException(status_code=404, detail="Meeting not found")
         else:
-            # Minimal fallback validation
             with db.get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,))
@@ -813,34 +1119,21 @@ def api_meeting_start(meeting_id: int):
     CURRENT_MEETING_ID = meeting_id
     return {"ok": True, "id": meeting_id}
 
-
 @app.post("/meeting/stop")
 def api_meeting_stop():
-    """
-    Clear the active meeting; new utterances will need an explicit meeting_id.
-    """
     global CURRENT_MEETING_ID
     CURRENT_MEETING_ID = None
     return {"ok": True}
 
-
 @app.get("/meeting/active")
 def api_meeting_active():
-    """
-    Return the current active meeting id (or null).
-    """
     return {"id": CURRENT_MEETING_ID}
-
 
 # -----------------------------
 # Utterance APIs (for UI)
 # -----------------------------
 @app.post("/utterance")
 def api_insert_utterance(u: UtteranceIn):
-    """
-    Insert a single utterance row.
-    - If meeting_id is omitted, use CURRENT_MEETING_ID.
-    """
     meeting_id = u.meeting_id if u.meeting_id is not None else CURRENT_MEETING_ID
     if meeting_id is None:
         raise HTTPException(status_code=400, detail="No meeting_id provided and no active meeting set")
@@ -860,30 +1153,28 @@ def api_insert_utterance(u: UtteranceIn):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to insert utterance: {e}")
 
-
 @app.get("/utterances")
 def api_list_utterances(
     meeting_id: int = Query(..., description="Which meeting to fetch"),
     limit: int = Query(200, ge=1, le=500, description="Max rows to return"),
     since_id: int = Query(0, ge=0, description="Only rows with id > since_id"),
+    speakers: str = Query("0", description="'0'|'heuristic'|'auto'"),
+    max_speakers: int | None = Query(None, ge=1, le=20),
 ):
-    """
-    List utterances for a meeting with optional delta fetching.
-
-    - If since_id == 0: first page / full snapshot (up to `limit`)
-    - Else: only rows with id > since_id (delta)
-    Response includes `next_since_id` so clients can resume efficiently.
-    """
     rows = db.list_utterances_for_meeting_since(meeting_id, since_id=since_id, limit=limit)
 
-    # Compute next_since_id: the max id we returned (or echo input if none)
+    if speakers == "heuristic":
+        try:
+            rows = _label_speakers(rows)
+        except NameError:
+            pass
+    elif speakers == "auto":
+        rows = _label_speakers_auto(rows, max_speakers)
+
     next_since_id = since_id
     for r in rows:
-        if r["id"] > next_since_id:
-            next_since_id = r["id"]
+        rid = r.get("id")
+        if isinstance(rid, int) and rid > next_since_id:
+            next_since_id = rid
 
-    return {
-        "items": rows,               # ASC by id
-        "count": len(rows),
-        "next_since_id": next_since_id,
-    }
+    return {"items": rows, "count": len(rows), "next_since_id": next_since_id}
