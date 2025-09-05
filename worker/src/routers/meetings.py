@@ -14,18 +14,25 @@ router = APIRouter(tags=["meetings"])
 def _fetch_meeting_meta(meeting_id: int) -> MeetingMeta:
     with get_connection() as conn:
         cur = conn.cursor()
-        # Try to include created_at if available
-        cur.execute(
-            "SELECT id, title, created_at FROM meetings WHERE id = ?",
-            (meeting_id,),
-        )
-        row = cur.fetchone()
+        # Prefer created_at; fall back to legacy 'created'
+        try:
+            cur.execute(
+                "SELECT id, title, created_at FROM meetings WHERE id = ?",
+                (meeting_id,),
+            )
+            row = cur.fetchone()
+        except Exception:
+            row = None
+        if row is None:
+            cur.execute(
+                "SELECT id, title, created FROM meetings WHERE id = ?",
+                (meeting_id,),
+            )
+            row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
-        # Some schemas might not have created_at; account for that
-        if len(row) == 3:
-            return MeetingMeta(id=int(row[0]), title=row[1], created_at=row[2])
-        return MeetingMeta(id=int(row[0]), title=row[1])  # type: ignore[arg-type]
+        created_at = row[2] if len(row) > 2 else None
+        return MeetingMeta(id=int(row[0]), title=row[1], created_at=created_at)  # type: ignore[arg-type]
 
 
 def _fetch_meeting_utterances(meeting_id: int) -> List[Utterance]:

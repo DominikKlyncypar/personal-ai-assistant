@@ -13,6 +13,7 @@ from .config import load_settings
 from .logging import setup_logging, install_app_logging
 from .errors import install_error_handlers
 from .state import State
+from .db import initialize_db
 
 
 def create_app() -> FastAPI:
@@ -106,6 +107,16 @@ def create_app() -> FastAPI:
     tmp_dir = (Path(__file__).resolve().parent.parent / settings.tmp_dir).resolve()
     tmp_dir.mkdir(parents=True, exist_ok=True)
     app.state.state = State(tmp_dir=tmp_dir)
+
+    # Ensure database schema exists before handling requests
+    try:
+        initialize_db()
+    except Exception as e:
+        try:
+            import logging
+            logging.getLogger("app").warning(f"initialize_db failed: {e}")
+        except Exception:
+            pass
 
     # CORS
     allow = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
