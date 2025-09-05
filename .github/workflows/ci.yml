@@ -20,7 +20,7 @@ jobs:
           python -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install fastapi uvicorn[standard] starlette pydantic pydantic-settings soundfile numpy pytest
+          pip install fastapi uvicorn[standard] starlette pydantic pydantic-settings soundfile numpy pytest httpx
       - name: Run tests
         run: |
           source .venv/bin/activate
