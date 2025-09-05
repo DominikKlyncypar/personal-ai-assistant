@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Optional, List
-
-import soundfile as sf
 from fastapi import HTTPException, UploadFile
 from datetime import datetime, timezone
 
@@ -103,6 +101,7 @@ def _transcribe_file(state: State, path: Path, language: Optional[str], beam_siz
 
     # Load audio via soundfile to avoid external ffmpeg dependency
     try:
+        import soundfile as sf  # lazy import to avoid CI system lib issues
         y, sr = sf.read(str(path), dtype="float32", always_2d=False)
         if isinstance(y, np.ndarray) and y.ndim == 2:
             y = y.mean(axis=1).astype(np.float32, copy=False)
@@ -204,6 +203,7 @@ def transcribe_wav(state: State, path: str, language: Optional[str] = None, beam
             mdl = _get_or_load_model(state)
 
             # Re-load audio here (local to this function)
+            import soundfile as sf  # lazy import
             y2, sr2 = sf.read(str(p), dtype="float32", always_2d=False)
             if isinstance(y2, np.ndarray) and y2.ndim == 2:
                 y2 = y2.mean(axis=1).astype(np.float32, copy=False)
@@ -299,6 +299,7 @@ def transcribe_upload(
 
     p = _save_upload_to_tmp(state, file)
     if p.suffix.lower() != ".wav":
+        import soundfile as sf  # lazy import
         data, sr = sf.read(str(p))
         wav_path = p.with_suffix(".wav")
         sf.write(str(wav_path), data, sr)
