@@ -14,6 +14,10 @@ build/
 
 # Ignore Python virtual environments
 worker/.venv/
+worker/.venv-311/
+worker/.ruff_cache/
+worker/tmp/
+worker/models/
 
 # Python
 __pycache__/

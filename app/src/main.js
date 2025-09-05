@@ -1,25 +1,48 @@
 const { spawn } = require('child_process')
 const path = require('path')
+const fs = require('fs')
 
 // 1. Import the app (controls app lifecycle) and BrowserWindow (creates windows)
 const { app, BrowserWindow, ipcMain, shell } = require('electron')
 let workerProc = null
+
+function resolvePython(workerDir) {
+  // Allow override via env
+  if (process.env.WORKER_PYTHON && fs.existsSync(process.env.WORKER_PYTHON)) {
+    return { cmd: process.env.WORKER_PYTHON, args: [] }
+  }
+  const isWin = process.platform === 'win32'
+  const venvPath = isWin
+    ? path.join(workerDir, '.venv', 'Scripts', 'python.exe')
+    : path.join(workerDir, '.venv', 'bin', 'python')
+  if (fs.existsSync(venvPath)) return { cmd: venvPath, args: [] }
+  // Fallbacks: try system python
+  if (isWin) return { cmd: 'py', args: ['-3'] } // Windows launcher
+  return { cmd: 'python3', args: [] }
+}
 
 function startWorker() {
   // __dirname is .../app/src
   const repoRoot = path.join(__dirname, '..')          // .../app
   const workerDir = path.join(repoRoot, '..', 'worker')// .../worker
 
-  // Mac/Linux venv python:
-  const pythonPath = path.join(workerDir, '.venv', 'bin', 'python')
+  const py = resolvePython(workerDir)
+  const modelDir = path.join(workerDir, 'models', 'faster-whisper-base')
+  const modelBin = path.join(modelDir, 'model.bin')
+  const modelCfg = path.join(modelDir, 'config.json')
+  const hasLocalModel = fs.existsSync(modelBin) && fs.existsSync(modelCfg)
 
-  // Command: python -m uvicorn src.main:app --port 8000
+  // Command: python -m uvicorn src.app:app --port 8000
   workerProc = spawn(
-    pythonPath,
-    ['-m', 'uvicorn', 'src.main:app', '--port', '8000'],
+    py.cmd,
+    [...py.args, '-m', 'uvicorn', 'src.app:app', '--port', '8000'],
     {
       cwd: workerDir,
-      env: { ...process.env },   // inherit your env
+      env: {
+        ...process.env,
+        // Only point to local model if the required files are present
+        ...(hasLocalModel ? { WORKER_WHISPER_MODEL_DIR: modelDir } : {}),
+      },
       stdio: 'inherit',          // pipe logs to Electron terminal
     }
   )
@@ -40,6 +63,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.js') // Load the preload script
     }
   })

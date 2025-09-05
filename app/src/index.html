@@ -234,6 +234,38 @@
           </button>
         </div>
 
+        <!-- Export + speaker labeling controls -->
+        <div class="stack" style="margin-top:12px">
+          <div class="row" style="gap:12px; align-items:center">
+            <label class="row" style="gap:8px">
+              <span class="muted">Speaker labels</span>
+              <select id="speakersMode">
+                <option value="0">None</option>
+                <option value="heuristic">Heuristic</option>
+                <option value="auto">Auto (embeddings)</option>
+              </select>
+            </label>
+            <label class="row" style="gap:8px">
+              <span class="muted">Max speakers</span>
+              <input type="number" id="maxSpeakers" min="1" max="20" placeholder="e.g., 5" style="width:80px" />
+            </label>
+
+            <button id="exportJsonBtn" class="btn-ghost btn-icon" title="Open JSON export in a new tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8v8H8z"/></svg>
+              Export JSON
+            </button>
+            <button id="exportMdBtn" class="btn-ghost btn-icon" title="Open Markdown export in a new tab">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 12h10M7 8h10M7 16h6"/></svg>
+              Export MD
+            </button>
+            <button id="openSummaryBtn" class="btn-ghost btn-icon" title="Open quick summary preview">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6m0-4V4"/><circle cx="12" cy="12" r="9"/></svg>
+              Summary
+            </button>
+          </div>
+          <div class="help">Exports use the current meeting and optional speaker mode.</div>
+        </div>
+
         <div class="help" id="meetingHelp">Create a meeting, then click Start to make it active. Utterances will attach automatically.</div>
       </section>
 
@@ -458,6 +490,7 @@
       //   POST /meeting/stop
       // ---------------------------------------------------------------------
       let activeMeetingId = null;
+      let serverMeetingId = null;  // server-reported active meeting
 
       function resetTranscriptViewFor(meetingId) {
         sinceIdByMeeting[meetingId || 0] = 0;
@@ -485,17 +518,16 @@
         updateMeetingStatusUI();
       }
 
-      /** Update the header badge inside the Meeting card. */
+      /** Update the header badge inside the Meeting card (shows client + server). */
       function updateMeetingStatusUI() {
         const el = document.getElementById('meetingStatus');
         if (!el) return;
-        if (activeMeetingId) {
-          el.textContent = `Active: #${activeMeetingId}`;
-          el.classList.remove('muted');
-        } else {
-          el.textContent = 'No active meeting';
-          el.classList.add('muted');
-        }
+        const clientTxt = activeMeetingId ? `#${activeMeetingId}` : 'none';
+        const serverTxt = (serverMeetingId || serverMeetingId === 0) ? (serverMeetingId ? `#${serverMeetingId}` : 'none') : '…';
+        const mismatch = !!(activeMeetingId && serverMeetingId && activeMeetingId !== serverMeetingId);
+        el.textContent = `Active: ${clientTxt} (server: ${serverTxt}${mismatch ? ' !' : ''})`;
+        if (activeMeetingId) el.classList.remove('muted'); else el.classList.add('muted');
+        if (mismatch) { el.style.color = '#eab308'; } else { el.style.color = ''; }
       }
 
       // Wire meeting buttons
@@ -512,11 +544,7 @@
           return;
         }
         try {
-          const r = await fetch('http://127.0.0.1:8000/meeting/new', {
-            method:'POST',
-            headers:{'content-type':'application/json'},
-            body: JSON.stringify({ title })
-          });
+          const r = await fetch(`http://127.0.0.1:8000/v1/meeting/new?title=${encodeURIComponent(title)}`, { method:'POST' });
           if (!r.ok) throw new Error('HTTP '+r.status);
           const j = await r.json();
           console.debug("[/meeting/new] response:", j);
@@ -526,7 +554,10 @@
           if (!j?.ok || !id) throw new Error('No id returned');
 
           saveActiveMeetingId(id);     // Make it the current meeting in the UI
+          if (transcriptBox) transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
+          if (activeMeetingId) sinceIdByMeeting[activeMeetingId] = 0;
           restartTranscriptPolling();  // refresh list for the (new) meeting
+          refreshServerMeetingStatus().catch(()=>{});
           toast(`Created meeting #${id}`);
         } catch (e) {
           console.error(e);
@@ -540,10 +571,13 @@
           return;
         }
         try {
-          const r = await fetch(`http://127.0.0.1:8000/meeting/start/${activeMeetingId}`, { method:'POST' });
+          const r = await fetch(`http://127.0.0.1:8000/v1/meeting/start/${activeMeetingId}`, { method:'POST' });
           if (!r.ok) throw new Error('HTTP '+r.status);
           await r.json();
           toast(`Started meeting #${activeMeetingId}`);
+          serverMeetingId = activeMeetingId; updateMeetingStatusUI();
+          if (transcriptBox) transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
+          if (activeMeetingId) sinceIdByMeeting[activeMeetingId] = 0;
           restartTranscriptPolling(); // now that a meeting is active, start fetching its utterances
         } catch (e) {
           console.error(e);
@@ -553,7 +587,7 @@
 
       stopMeetingBtn?.addEventListener('click', async () => {
         try {
-          const r = await fetch('http://127.0.0.1:8000/meeting/stop', { method:'POST' });
+          const r = await fetch('http://127.0.0.1:8000/v1/meeting/stop', { method:'POST' });
           if (!r.ok) throw new Error('HTTP '+r.status);
           await r.json();
           toast('Stopped active meeting');
@@ -564,8 +598,66 @@
           // We keep activeMeetingId in localStorage (user can START again),
           // but we pause transcript polling because the meeting is stopped.
           stopTranscriptPolling();
-          updateMeetingStatusUI();
+          serverMeetingId = null; updateMeetingStatusUI();
         }
+      });
+
+      // Fetch server active meeting id and update UI
+      async function refreshServerMeetingStatus(){
+        try{
+          const r = await fetch('http://127.0.0.1:8000/v1/meeting/active');
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          const j = await r.json();
+          serverMeetingId = (typeof j.id === 'number') ? j.id : (j.id ? Number(j.id) : null);
+        }catch{ serverMeetingId = null; }
+        updateMeetingStatusUI();
+      }
+
+      // ---------------------------------------------------------------------
+      // ---------------------------------------------------------------------
+      // Export handlers (JSON / MD / Summary) with optional speaker mode
+      // ---------------------------------------------------------------------
+      const speakersModeSel = document.getElementById('speakersMode');
+      const maxSpeakersInp  = document.getElementById('maxSpeakers');
+      const exportJsonBtn   = document.getElementById('exportJsonBtn');
+      const exportMdBtn     = document.getElementById('exportMdBtn');
+      const openSummaryBtn  = document.getElementById('openSummaryBtn');
+
+      function buildSpeakerQuery() {
+        const mode = (speakersModeSel?.value || '0');
+        const maxS = (maxSpeakersInp?.value || '').trim();
+        const params = new URLSearchParams();
+        if (mode && mode !== '0') params.set('speakers', mode);
+        if (maxS) params.set('max_speakers', String(Math.max(1, Math.min(20, Number(maxS)))));
+        return params.toString();
+      }
+
+      function ensureMeetingOrToast() {
+        if (!activeMeetingId) {
+          toast('No active meeting. Create & Start one first.', 'warn');
+          return false;
+        }
+        return true;
+      }
+
+      exportJsonBtn?.addEventListener('click', () => {
+        if (!ensureMeetingOrToast()) return;
+        const q = buildSpeakerQuery();
+        const url = `http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/export.json` + (q ? `?${q}` : '');
+        window.open(url, '_blank', 'noopener,noreferrer');
+      });
+
+      exportMdBtn?.addEventListener('click', () => {
+        if (!ensureMeetingOrToast()) return;
+        const q = buildSpeakerQuery();
+        const url = `http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/export.md` + (q ? `?${q}` : '');
+        window.open(url, '_blank', 'noopener,noreferrer');
+      });
+
+      openSummaryBtn?.addEventListener('click', () => {
+        if (!ensureMeetingOrToast()) return;
+        const url = `http://127.0.0.1:8000/meeting/${activeMeetingId}/summary`;
+        window.open(url, '_blank', 'noopener,noreferrer');
       });
 
       // ---------------------------------------------------------------------
@@ -577,12 +669,23 @@
       const refreshBtn = document.getElementById("refreshDevices");
 
       async function loadDevicesOnce() {
-        const res = await fetch("http://127.0.0.1:8000/devices");
+        const res = await fetch("http://127.0.0.1:8000/v1/devices");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
 
         playbackSelect.innerHTML = "";
         micSelect.innerHTML = "";
+
+        // Placeholders so user can leave playback empty and choose mic explicitly
+        const pbNone = document.createElement('option');
+        pbNone.value = '';
+        pbNone.textContent = 'None (no loopback)';
+        playbackSelect.appendChild(pbNone);
+
+        const micPlaceholder = document.createElement('option');
+        micPlaceholder.value = '';
+        micPlaceholder.textContent = 'Select input…';
+        micSelect.appendChild(micPlaceholder);
 
         for (const d of data.outputs) {
           const opt = document.createElement("option");
@@ -638,13 +741,14 @@
       /** Ask backend if capture is running, then update button state + label. */
       async function refreshCaptureStatus() {
         try {
-          const r = await fetch("http://127.0.0.1:8000/capture_status");
+          const r = await fetch("http://127.0.0.1:8000/v1/capture_status");
           if (!r.ok) throw new Error("HTTP " + r.status);
           const j = await r.json();
-          capStatus.textContent = j.running ? "Capturing…" : "Stopped";
-          setRunButtons(j.running);
-          styleCapStatus(j.running);
-          return j.running;
+          captureRunning = !!j.running;
+          capStatus.textContent = captureRunning ? "Capturing…" : "Stopped";
+          setRunButtons(captureRunning);
+          styleCapStatus(captureRunning);
+          return captureRunning;
         } catch (e) {
           capStatus.textContent = "Status error";
           console.error(e);
@@ -666,7 +770,7 @@
       }
       let levelTimer=null;
       async function pollLevelOnce(){
-        const r=await fetch("http://127.0.0.1:8000/level");
+        const r=await fetch("http://127.0.0.1:8000/v1/level");
         if(!r.ok) throw new Error('HTTP '+r.status);
         const j=await r.json();
         updateLevelUI(j.rms||0, !!j.running);
@@ -703,7 +807,7 @@
       /** Poll VAD and trigger auto-transcribe when speech → silence. */
       async function pollVadOnce(){
         const ng=noiseGateInput.value||-40, vad=vadAggSelect.value||3;
-        const r=await fetch(`http://127.0.0.1:8000/vad_check?ng=${encodeURIComponent(ng)}&vad=${encodeURIComponent(vad)}`);
+        const r=await fetch(`http://127.0.0.1:8000/v1/vad_check?ng=${encodeURIComponent(ng)}&vad=${encodeURIComponent(vad)}`);
         if(!r.ok) throw new Error('HTTP '+r.status);
         const j=await r.json();
         setVadUI({speech:!!j.speech, running:!!j.running});
@@ -728,10 +832,11 @@
       // ----- Transcripts (MEETING-AWARE) — adaptive polling to reduce spam -----
       const transcriptBox = document.getElementById('transcriptBox');
       const sinceIdByMeeting = Object.create(null);
-      let trTimer = null;
-      let pollMs = 1500;         // starts fast
-      let idleRounds = 0;        // if nothing new, we slow down
+      let trTimer = null;        // handle for setTimeout loop
+      let pollMs = 1500;         // adaptive interval (ms)
+      let idleRounds = 0;        // consecutive empty polls
       let lastRenderedIds = "";  // simple fingerprint to detect changes
+      let captureRunning = false; // updated by refreshCaptureStatus()
 
       /** Small badge with color per confidence bucket. */
       function confBadge(conf) {
@@ -767,7 +872,7 @@
         if (!activeMeetingId) return;
 
         const currentSince = sinceIdByMeeting[activeMeetingId] ?? 0;
-        const r = await fetch(`http://127.0.0.1:8000/utterances?meeting_id=${activeMeetingId}&since_id=${currentSince}&limit=200`);
+        const r = await fetch(`http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/utterances?since_id=${currentSince}&limit=200`);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
 
@@ -780,16 +885,25 @@
         if (typeof j.next_since_id === 'number') {
           sinceIdByMeeting[activeMeetingId] = j.next_since_id;
         }
+        // Adaptive interval: fast when capturing or new items; otherwise backoff up to 8s
+        const gotNew = Array.isArray(j.items) && j.items.length > 0;
+        if (captureRunning || gotNew) { pollMs = 1500; idleRounds = 0; }
+        else { idleRounds = Math.min(idleRounds + 1, 10); pollMs = Math.min(1500 + idleRounds*650, 8000); }
       }
 
       function startTranscriptPolling(){
         if (trTimer) return;
-        // grab an initial snapshot (since_id=0) if we just switched meetings
-        pollTranscriptsOnce().catch(()=>{});
-        trTimer = setInterval(()=>{ pollTranscriptsOnce().catch(()=>{}); }, 1500);
+        const loop = async () => {
+          trTimer = null;
+          if (document.hidden) { trTimer = setTimeout(loop, 2500); return; }
+          try { await pollTranscriptsOnce(); } catch {}
+          trTimer = setTimeout(loop, pollMs);
+        };
+        loop();
       }
-      function stopTranscriptPolling(){ if (trTimer){ clearInterval(trTimer); trTimer = null; } }
+      function stopTranscriptPolling(){ if (trTimer){ clearTimeout(trTimer); trTimer = null; } }
       function restartTranscriptPolling(){ stopTranscriptPolling(); startTranscriptPolling(); }
+      document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) restartTranscriptPolling(); });
       
       // ---------------------------------------------------------------------
       // Auto-transcribe helper
@@ -799,15 +913,14 @@
         if (autoTrBusy || autoTrCooldown) return;
         autoTrBusy = true;
         try{
-          const r1 = await fetch(`http://127.0.0.1:8000/dump_wav?seconds=${seconds}&label=auto`);
+          const r1 = await fetch(`http://127.0.0.1:8000/v1/dump_wav?seconds=${seconds}&label=auto`);
           if (!r1.ok) throw new Error('dump failed');
           const j1 = await r1.json();
           if (!j1.ok) throw new Error(j1.message || 'dump failed');
 
-          const r2 = await fetch(`http://127.0.0.1:8000/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en`);
-          if (!r2.ok) throw new Error('transcribe failed');
-
-          await r2.json();               // server stores utterance in DB
+          const r2 = await fetch(`http://127.0.0.1:8000/v1/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en${activeMeetingId?`&meeting_id=${activeMeetingId}`:''}`);
+          const j2 = await r2.json();
+          if (!r2.ok || !j2.ok) throw new Error((j2 && j2.error) ? j2.error : 'transcribe failed');
           await pollTranscriptsOnce();   // refresh UI immediately
           toast(`Auto-transcribed ${j1.filename}`, 'ok');
         } catch (e) {
@@ -828,7 +941,7 @@
       dumpBtn.addEventListener('click', async ()=>{
         dumpStatus.textContent='Saving…';
         try{
-          const res=await fetch('http://127.0.0.1:8000/dump_wav?seconds=5');
+          const res=await fetch('http://127.0.0.1:8000/v1/dump_wav?seconds=5');
           if(!res.ok) throw new Error('HTTP '+res.status);
           const data=await res.json();
           if(!data.ok) throw new Error(data.message||'Unknown error');
@@ -843,10 +956,10 @@
       manualBtn.addEventListener('click', async ()=>{
         manualLabel.textContent='Working…';
         try{
-          const r1=await fetch('http://127.0.0.1:8000/dump_wav?seconds=10&label=manual'); if(!r1.ok) throw new Error('dump failed');
+          const r1=await fetch('http://127.0.0.1:8000/v1/dump_wav?seconds=10&label=manual'); if(!r1.ok) throw new Error('dump failed');
           const j1=await r1.json(); if(!j1.ok) throw new Error(j1.message||'dump failed');
-          const r2=await fetch(`http://127.0.0.1:8000/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en`); if(!r2.ok) throw new Error('transcribe failed');
-          await r2.json(); // server appends to DB
+          const r2=await fetch(`http://127.0.0.1:8000/v1/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en${activeMeetingId?`&meeting_id=${activeMeetingId}`:''}`);
+          const j2=await r2.json(); if(!r2.ok || !j2.ok) throw new Error((j2 && j2.error) ? j2.error : 'transcribe failed');
           manualLabel.textContent=`Saved + transcribed: ${j1.filename}`;
           toast(`Transcribed ${j1.filename}`, 'ok');
           await pollTranscriptsOnce();
@@ -878,6 +991,7 @@
       (async function boot(){
         loadPreferences();
         loadActiveMeetingId();                 // meeting id from localStorage
+        await refreshServerMeetingStatus();    // show server status early
         const online=await waitForWorkerOnline();
         if(online){
           await loadDevicesWithRetry();
@@ -886,18 +1000,25 @@
         }else{
           deviceHelp.textContent="Worker not ready. Try Refresh devices.";
         }
+        // Light polling to keep server status badge fresh
+        setInterval(()=>{ refreshServerMeetingStatus().catch(()=>{}); }, 5000);
       })();
 
       // Hook capture start/stop to backend + begin/stop polling loops
       startBtn.addEventListener("click", async ()=>{
         capStatus.textContent="Starting…";
         try{
+          // Ensure server has the same active meeting as the UI
+          if (activeMeetingId) {
+            try { await fetch(`http://127.0.0.1:8000/v1/meeting/start/${activeMeetingId}`, { method:'POST' }); } catch {}
+            serverMeetingId = activeMeetingId; updateMeetingStatusUI();
+          }
           const body={
-            playback_id:Number(playbackSelect.value||0),
-            mic_id:Number(micSelect.value||0),
+            playback_id: (playbackSelect.value === '' ? null : Number(playbackSelect.value)),
+            mic_id: (micSelect.value === '' ? null : Number(micSelect.value)),
             samplerate:48000
           };
-          const r=await fetch("http://127.0.0.1:8000/start_capture",{
+          const r=await fetch("http://127.0.0.1:8000/v1/start_capture",{
             method:"POST",
             headers:{ "Content-Type":"application/json" },
             body:JSON.stringify(body)
@@ -916,7 +1037,7 @@
 
       stopBtn.addEventListener("click", async ()=>{
         capStatus.textContent="Stopping…";
-        try{ await fetch("http://127.0.0.1:8000/stop_capture",{ method:"POST" }); }catch{}
+        try{ await fetch("http://127.0.0.1:8000/v1/stop_capture",{ method:"POST" }); }catch{}
         stopLevelPolling();
         stopVadPolling();
         await refreshCaptureStatus();
