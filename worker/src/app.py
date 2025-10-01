@@ -9,11 +9,38 @@ from .routers.meetings import router as meetings_router
 from .routers.capture import router as capture_router
 from .routers.transcribe import router as transcribe_router
 from .routers.vad import router as vad_router
+from .routers.auto import router as auto_router
 from .config import load_settings
 from .logging import setup_logging, install_app_logging
 from .errors import install_error_handlers
 from .state import State
 from .db import initialize_db
+
+
+def _load_env_file(env_path: Path) -> None:
+    """Minimal .env loader: KEY=VALUE lines into os.environ if not set.
+    - Ignores comments and blank lines
+    - Strips surrounding quotes
+    - Supports optional 'export ' prefix
+    """
+    try:
+        if not env_path.exists():
+            return
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.lower().startswith("export "):
+                line = line[7:].lstrip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            key = k.strip()
+            val = v.strip().strip('"').strip("'")
+            os.environ.setdefault(key, val)
+    except Exception:
+        # Best-effort only; ignore parse errors
+        pass
 
 
 def create_app() -> FastAPI:
@@ -97,6 +124,16 @@ def create_app() -> FastAPI:
         except Exception:
             pass
 
+    # Load environment from optional .env files (repo root and worker dir)
+    try:
+        src_dir = Path(__file__).resolve().parent
+        worker_dir = src_dir.parent
+        repo_root = worker_dir.parent
+        _load_env_file(repo_root / ".env")
+        _load_env_file(worker_dir / ".env")
+    except Exception:
+        pass
+
     settings = load_settings()
     setup_logging()
 
@@ -136,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(capture_router, prefix="/v1")
     app.include_router(transcribe_router, prefix="/v1")
     app.include_router(vad_router, prefix="/v1")
+    app.include_router(auto_router, prefix="/v1")
 
     # Basic health endpoint (for Electron pings)
     @app.get("/health")

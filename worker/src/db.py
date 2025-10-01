@@ -74,6 +74,22 @@ def initialize_db() -> None:
             """
         )
 
+        # meeting_notes: cached notes per meeting and mode (strict/non-strict)
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meeting_notes (
+                meeting_id INTEGER NOT NULL,
+                strict     INTEGER NOT NULL DEFAULT 0,
+                content_md TEXT NOT NULL,
+                provider   TEXT,
+                model      TEXT,
+                created_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (meeting_id, strict),
+                FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+            );
+            """
+        )
+
         conn.commit()
 
 def new_meeting(title: str) -> int:
@@ -239,3 +255,85 @@ def list_utterances_for_meeting_since(
         for r in cur.fetchall()
     ]
     return rows
+
+
+# --------------------- Notes cache helpers ---------------------
+def upsert_meeting_notes(
+    meeting_id: int,
+    content_md: str,
+    strict: bool = False,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> None:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        # Ensure meeting exists
+        cur.execute("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,))
+        if cur.fetchone() is None:
+            raise ValueError(f"Meeting {meeting_id} does not exist")
+        cur.execute(
+            """
+            INSERT INTO meeting_notes (meeting_id, strict, content_md, provider, model, created_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(meeting_id, strict)
+            DO UPDATE SET content_md=excluded.content_md,
+                          provider=excluded.provider,
+                          model=excluded.model,
+                          created_at=excluded.created_at
+            """,
+            (meeting_id, 1 if strict else 0, content_md, provider, model),
+        )
+
+
+def get_meeting_notes(meeting_id: int, strict: bool = False) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT content_md, provider, model, created_at
+            FROM meeting_notes
+            WHERE meeting_id = ? AND strict = ?
+            """,
+            (meeting_id, 1 if strict else 0),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "content_md": row[0],
+            "provider": row[1],
+            "model": row[2],
+            "created_at": row[3],
+        }
+
+
+def list_meetings(limit: int = 200) -> List[Dict[str, Any]]:
+    """Return recent meetings (newest first)."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        # Prefer created_at if schema migrated; otherwise use legacy created
+        try:
+            cur.execute(
+                "SELECT id, title, created_at FROM meetings ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            rows = cur.fetchall()
+            use_created_at = True
+        except Exception:
+            cur.execute(
+                "SELECT id, title, created FROM meetings ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            rows = cur.fetchall()
+            use_created_at = False
+
+        items: List[Dict[str, Any]] = []
+        for r in rows:
+            items.append(
+                {
+                    "id": int(r[0]),
+                    "title": r[1],
+                    "created_at": r[2] if use_created_at else r[2],
+                }
+            )
+        return items

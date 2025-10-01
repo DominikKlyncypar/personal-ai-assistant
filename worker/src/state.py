@@ -49,8 +49,8 @@ class State:
 
     tmp_dir: Path
     buffer_seconds: int = 180
-    auto_transcribe: bool = True
-    auto_window_s: int = 12
+    auto_transcribe: bool = False
+    auto_window_s: int = 60
     auto_gap_s: float = 2.5
     auto_busy: bool = False
     last_trigger_ts: float = 0.0
