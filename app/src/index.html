@@ -203,8 +203,8 @@
           </div>
         </div>
         <div class="row">
-          <button id="pingBtn" class="btn-ghost">Ping Worker</button>
-          <span id="pingResult" class="status muted">—</span>
+          <span class="muted">Worker:</span>
+          <span id="workerStatus" class="status muted">Checking…</span>
         </div>
       </header>
 
@@ -244,58 +244,73 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
             Refresh
           </button>
-          <button id="useMeetingBtn" class="btn-ghost btn-icon" title="Use selected as active (client)">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg>
-            Use Selected
-          </button>
           <button id="loadFullBtn" class="btn-ghost btn-icon" title="Load full transcript into view">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h8M8 12h8M8 18h8"/></svg>
             Load Full Transcript
           </button>
+          <button id="deleteMeetingBtn" class="btn-ghost btn-icon" title="Delete selected meeting and its transcripts">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+            Delete
+          </button>
         </div>
 
-        <!-- Export + speaker labeling controls -->
-        <div class="stack" style="margin-top:12px">
-          <div class="row" style="gap:12px; align-items:center">
-            <label class="row" style="gap:8px">
-              <span class="muted">Speaker labels</span>
-              <select id="speakersMode">
-                <option value="0">None</option>
-                <option value="heuristic">Heuristic</option>
-                <option value="auto">Auto (embeddings)</option>
-              </select>
-            </label>
-            <label class="row" style="gap:8px">
-              <span class="muted">Max speakers</span>
-              <input type="number" id="maxSpeakers" min="1" max="20" placeholder="e.g., 5" style="width:80px" />
-            </label>
+        <!-- Export + speaker labeling controls (collapsible) -->
+        <details class="collapsible" style="margin-top:12px">
+          <summary class="muted" style="cursor:pointer">Export & Speaker Options</summary>
+          <div class="stack" style="margin-top:10px">
+            <div class="row" style="gap:12px; align-items:center">
+              <label class="row" style="gap:8px">
+                <span class="muted">Speaker labels</span>
+                <select id="speakersMode">
+                  <option value="0">None</option>
+                  <option value="heuristic">Heuristic</option>
+                  <option value="auto">Auto (embeddings)</option>
+                </select>
+              </label>
+              <label class="row" style="gap:8px">
+                <span class="muted">Max speakers</span>
+                <input type="number" id="maxSpeakers" min="1" max="20" placeholder="e.g., 5" style="width:80px" />
+              </label>
 
-            <button id="exportJsonBtn" class="btn-ghost btn-icon" title="Open JSON export in a new tab">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8v8H8z"/></svg>
-              Export JSON
-            </button>
-            <button id="exportMdBtn" class="btn-ghost btn-icon" title="Open Markdown export in a new tab">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 12h10M7 8h10M7 16h6"/></svg>
-              Export MD
-            </button>
-            <button id="openSummaryBtn" class="btn-ghost btn-icon" title="Open quick summary preview">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6m0-4V4"/><circle cx="12" cy="12" r="9"/></svg>
-              Summary
-            </button>
-            <button id="exportNotesMdBtn" class="btn-ghost btn-icon" title="Open notes (Markdown) in a new tab">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
-              Notes MD
-            </button>
-            <label class="row" style="gap:6px; margin-left:8px" title="Use stricter rewrite to avoid verbatim quotes">
-              <input type="checkbox" id="summaryStrictToggle" />
-              <span class="muted">Strict rewrite</span>
-            </label>
-            <button id="regenSummaryBtn" class="btn-ghost btn-icon" title="Regenerate notes (recompute via model)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
-              Regenerate
-            </button>
+              <button id="exportJsonBtn" class="btn-ghost btn-icon" title="Open JSON export in a new tab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8v8H8z"/></svg>
+                Export JSON
+              </button>
+              <button id="exportMdBtn" class="btn-ghost btn-icon" title="Open Markdown export in a new tab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 12h10M7 8h10M7 16h6"/></svg>
+                Export MD
+              </button>
+            </div>
+            <div class="help">Exports use the current meeting and optional speaker mode.</div>
           </div>
-          <div class="help">Exports use the current meeting and optional speaker mode.</div>
+        </details>
+
+        <!-- Summary controls (kept prominent) -->
+        <div class="row" style="gap:12px; align-items:center; margin-top:10px">
+          <button id="openSummaryBtn" class="btn-ghost btn-icon" title="Open quick summary preview">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6m0-4V4"/><circle cx="12" cy="12" r="9"/></svg>
+            Summary
+          </button>
+          <button id="exportNotesMdBtn" class="btn-ghost btn-icon" title="Open notes (Markdown) in a new tab">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
+            Notes MD
+          </button>
+          <button id="saveNotesBtn" class="btn-ghost btn-icon" title="Save notes to exports/ as Markdown">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Save Notes
+          </button>
+          <button id="saveDocxBtn" class="btn-ghost btn-icon" title="Save notes to exports/ as DOCX">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 8h5M7 12h8M7 16h10"/></svg>
+            Save DOCX
+          </button>
+          <label class="row" style="gap:6px; margin-left:8px" title="Use stricter rewrite to avoid verbatim quotes">
+            <input type="checkbox" id="summaryStrictToggle" />
+            <span class="muted">Strict rewrite</span>
+          </label>
+          <button id="regenSummaryBtn" class="btn-ghost btn-icon" title="Regenerate notes (recompute via model)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+            Regenerate
+          </button>
         </div>
 
         <div class="help" id="meetingHelp">Create a meeting, then click Start to make it active. Utterances will attach automatically.</div>
@@ -355,11 +370,8 @@
           <span id="levelLabel" class="muted">Level: (waiting) | ~dB: —</span>
         </div>
 
-        <div class="row" style="margin-top:12px">
-          <button id="dumpBtn" class="btn-ghost">Save last 5s to WAV</button>
-          <span id="dumpStatus" class="muted"></span>
-
-          <button id="manualTranscribeBtn" class="btn-ghost" style="margin-left:12px">Transcribe last 10s</button>
+          <div class="row" style="margin-top:12px">
+          <button id="manualTranscribeBtn" class="btn-ghost">Transcribe last 10s</button>
           <span id="manualTrStatus" class="muted"></span>
         </div>
       </section>
@@ -374,45 +386,48 @@
           <span id="vadLabel" class="muted">Speech: (idle)</span>
         </div>
 
-        <div class="stack" style="margin-top:12px">
-          <strong>Speech events</strong>
-          <div class="row">
-            <button id="clearLogBtn" class="btn-ghost">Clear</button>
+        <details class="collapsible" style="margin-top:12px">
+          <summary class="muted" style="cursor:pointer">Advanced: VAD Log & Preferences</summary>
+          <div class="stack" style="margin-top:10px">
+            <strong>Speech events</strong>
+            <div class="row">
+              <button id="clearLogBtn" class="btn-ghost">Clear</button>
+            </div>
+            <div id="speechLog"><em>Waiting…</em></div>
           </div>
-          <div id="speechLog"><em>Waiting…</em></div>
-        </div>
 
-        <div class="stack" style="margin-top:14px">
-          <h3>Preferences</h3>
-          <div class="row">
-            <label class="row" style="gap:8px">
-              <span class="muted">Noise Gate (dB)</span>
-              <input type="number" id="noiseGateInput" step="1" style="width:80px" />
-            </label>
-            <label class="row" style="gap:8px">
-              <span class="muted">VAD Aggressiveness</span>
-              <select id="vadAggSelect">
-                <option value="0">0 (permissive)</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3 (strict)</option>
-              </select>
-            </label>
-            <label class="row" style="gap:8px">
-              <input type="checkbox" id="autoTrToggle" checked />
-              <span class="muted">Auto transcribe on speech end</span>
-            </label>
-            <label class="row" style="gap:8px">
-              <span class="muted">Auto window (s)</span>
-              <input type="number" id="autoTrSecondsInput" min="5" max="180" step="5" style="width:80px" />
-            </label>
-            <label class="row" style="gap:8px">
-              <span class="muted">Silence hangover (ms)</span>
-              <input type="number" id="hangoverInput" min="500" max="8000" step="100" style="width:100px" />
-            </label>
+          <div class="stack" style="margin-top:14px">
+            <h3>Preferences</h3>
+            <div class="row">
+              <label class="row" style="gap:8px">
+                <span class="muted">Noise Gate (dB)</span>
+                <input type="number" id="noiseGateInput" step="1" style="width:80px" />
+              </label>
+              <label class="row" style="gap:8px">
+                <span class="muted">VAD Aggressiveness</span>
+                <select id="vadAggSelect">
+                  <option value="0">0 (permissive)</option>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3 (strict)</option>
+                </select>
+              </label>
+              <label class="row" style="gap:8px">
+                <input type="checkbox" id="autoTrToggle" checked />
+                <span class="muted">Auto transcribe on speech end</span>
+              </label>
+              <label class="row" style="gap:8px">
+                <span class="muted">Auto window (s)</span>
+                <input type="number" id="autoTrSecondsInput" min="5" max="180" step="5" style="width:80px" />
+              </label>
+              <label class="row" style="gap:8px">
+                <span class="muted">Silence hangover (ms)</span>
+                <input type="number" id="hangoverInput" min="500" max="8000" step="100" style="width:100px" />
+              </label>
+            </div>
+            <span class="help">Values are saved locally and sent to the worker.</span>
           </div>
-          <span class="help">Values are saved locally and sent to the worker.</span>
-        </div>
+        </details>
       </section>
 
       <!-- =================================================================== -->
@@ -421,11 +436,6 @@
       <section class="card transcripts col-span-2">
         <div class="spaced">
           <h2>Transcripts</h2>
-          <div class="row">
-            <input id="echoInput" placeholder="echo test…" style="width:180px" />
-            <button id="echoBtn" class="btn-ghost">Send</button>
-            <span id="echoOut" class="status muted">—</span>
-          </div>
         </div>
         <div id="transcriptBox" style="margin-top:10px"><em>No transcripts yet.</em></div>
       </section>
@@ -549,8 +559,7 @@
       // ---------------------------------------------------------------------
       // Worker health (simple GET /health + retry loop on boot)
       // ---------------------------------------------------------------------
-      const pingBtn = document.getElementById("pingBtn");
-      const pingResult = document.getElementById("pingResult");
+      const workerStatus = document.getElementById("workerStatus");
 
       /** One-shot worker health check. */
       async function checkHealthOnce() {
@@ -567,16 +576,15 @@
         }
         return false;
       }
-      pingBtn.addEventListener("click", async () => {
-        pingResult.textContent = "Pinging…";
-        try {
+      // Update header status periodically
+      async function updateWorkerStatus(){
+        try{
           const ok = await checkHealthOnce();
-          pingResult.textContent = ok ? "Worker responded: {\"status\":\"ok\"}" : "Unexpected response";
-        } catch (e) {
-          pingResult.textContent = "Ping failed: " + e.message;
-          console.error(e);
+          if(workerStatus){ workerStatus.textContent = ok ? 'Online' : 'Offline'; workerStatus.style.color = ok ? 'var(--ok)' : 'var(--bad)'; }
+        }catch{
+          if(workerStatus){ workerStatus.textContent = 'Offline'; workerStatus.style.color = 'var(--bad)'; }
         }
-      });
+      }
 
       // ---------------------------------------------------------------------
       // Meeting state & helpers
@@ -588,6 +596,7 @@
       // ---------------------------------------------------------------------
       let activeMeetingId = null;
       let serverMeetingId = null;  // server-reported active meeting
+      const meetingMetaById = Object.create(null); // { id: {created_at, title} }
 
       function resetTranscriptViewFor(meetingId) {
         sinceIdByMeeting[meetingId || 0] = 0;
@@ -619,8 +628,12 @@
       function updateMeetingStatusUI() {
         const el = document.getElementById('meetingStatus');
         if (!el) return;
-        const clientTxt = activeMeetingId ? `#${activeMeetingId}` : 'none';
-        const serverTxt = (serverMeetingId || serverMeetingId === 0) ? (serverMeetingId ? `#${serverMeetingId}` : 'none') : '…';
+        const clientMeta = activeMeetingId ? meetingMetaById[activeMeetingId] : null;
+        const clientTxt = activeMeetingId ? (clientMeta && clientMeta.created_at ? clientMeta.created_at : 'selected') : 'none';
+        const serverMeta = serverMeetingId ? meetingMetaById[serverMeetingId] : null;
+        const serverTxt = (serverMeetingId || serverMeetingId === 0)
+          ? (serverMeetingId ? (serverMeta && serverMeta.created_at ? serverMeta.created_at : `selected`) : 'none')
+          : '…';
         const mismatch = !!(activeMeetingId && serverMeetingId && activeMeetingId !== serverMeetingId);
         el.textContent = `Active: ${clientTxt} (server: ${serverTxt}${mismatch ? ' !' : ''})`;
         if (activeMeetingId) el.classList.remove('muted'); else el.classList.add('muted');
@@ -634,8 +647,14 @@
       const meetingTitleInp = document.getElementById('meetingTitleInput');
       const meetingSelect   = document.getElementById('meetingSelect');
       const refreshMeetingListBtn = document.getElementById('refreshMeetingListBtn');
-      const useMeetingBtn = document.getElementById('useMeetingBtn');
       const loadFullBtn = document.getElementById('loadFullBtn');
+      const deleteMeetingBtn = document.getElementById('deleteMeetingBtn');
+
+      function labelForMeeting(it){
+        const dt = (it && it.created_at) ? String(it.created_at) : '';
+        const title = (it && it.title) ? String(it.title) : 'Untitled';
+        return dt ? `${dt} — ${title}` : title;
+      }
 
       async function fetchMeetingList() {
         try {
@@ -650,9 +669,10 @@
           placeholder.textContent = '(select a meeting)';
           meetingSelect.appendChild(placeholder);
           j.items.forEach(it => {
+            meetingMetaById[it.id] = { created_at: it.created_at || '', title: it.title || '' };
             const opt = document.createElement('option');
             opt.value = String(it.id);
-            opt.textContent = `#${it.id} — ${it.title || 'Untitled'}${it.created_at ? ' ('+it.created_at+')' : ''}`;
+            opt.textContent = labelForMeeting(it);
             if (activeMeetingId && Number(activeMeetingId) === Number(it.id)) opt.selected = true;
             meetingSelect.appendChild(opt);
           });
@@ -678,12 +698,31 @@
         if (!Number.isFinite(id)) return;
         saveActiveMeetingId(id);
       });
-      useMeetingBtn?.addEventListener('click', () => {
-        const val = meetingSelect.value;
-        if (!val) { toast('Select a meeting first', 'warn'); return; }
-        const id = Number(val);
-        saveActiveMeetingId(id);
-        toast(`Selected meeting #${id}`);
+      // Selecting in dropdown immediately sets active meeting
+
+      deleteMeetingBtn?.addEventListener('click', async () => {
+        const val = meetingSelect && meetingSelect.value;
+        const id = val ? Number(val) : (activeMeetingId || null);
+        if (!id) { toast('Select a meeting first', 'warn'); return; }
+        const label = meetingMetaById[id]?.created_at || `#${id}`;
+        const ok = confirm(`Delete meeting (${label}) and all its transcripts? This cannot be undone.`);
+        if (!ok) return;
+        try {
+          const r = await fetch(`http://127.0.0.1:8000/v1/meeting/${id}`, { method:'DELETE' });
+          if (!r.ok) throw new Error('HTTP '+r.status);
+          const j = await r.json();
+          if (!j.ok || !j.deleted_meeting) throw new Error('Delete failed');
+          if (activeMeetingId === id) {
+            saveActiveMeetingId(null);
+            transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
+          }
+          toast(`Deleted meeting (${label})`, 'ok');
+          await fetchMeetingList();
+          updateMeetingStatusUI();
+        } catch (e) {
+          console.error(e);
+          toast('Delete failed: ' + e.message, 'error');
+        }
       });
 
       loadFullBtn?.addEventListener('click', async () => {
@@ -732,7 +771,8 @@
           if (activeMeetingId) sinceIdByMeeting[activeMeetingId] = 0;
           restartTranscriptPolling();  // refresh list for the (new) meeting
           refreshServerMeetingStatus().catch(()=>{});
-          toast(`Created meeting #${id}`);
+          const m = meetingMetaById[id];
+          toast(`Created meeting: ${(m && m.created_at) ? m.created_at : 'New'}`);
           // Refresh meeting list so the new one appears in the dropdown
           fetchMeetingList().catch(()=>{});
         } catch (e) {
@@ -750,7 +790,7 @@
           const r = await fetch(`http://127.0.0.1:8000/v1/meeting/start/${activeMeetingId}`, { method:'POST' });
           if (!r.ok) throw new Error('HTTP '+r.status);
           await r.json();
-          toast(`Started meeting #${activeMeetingId}`);
+          toast('Started meeting');
           serverMeetingId = activeMeetingId; updateMeetingStatusUI();
           if (transcriptBox) transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
           if (activeMeetingId) sinceIdByMeeting[activeMeetingId] = 0;
@@ -799,6 +839,8 @@
       const exportMdBtn     = document.getElementById('exportMdBtn');
       const openSummaryBtn  = document.getElementById('openSummaryBtn');
       const exportNotesMdBtn= document.getElementById('exportNotesMdBtn');
+      const saveNotesBtn    = document.getElementById('saveNotesBtn');
+      const saveDocxBtn     = document.getElementById('saveDocxBtn');
       const summaryStrictToggle = document.getElementById('summaryStrictToggle');
       const regenSummaryBtn = document.getElementById('regenSummaryBtn');
 
@@ -847,6 +889,34 @@
         const bust = Date.now();
         const url = `http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/summary.md?strict=${strict}&_=${bust}`; // cached unless missing
         window.open(url, '_blank', 'noopener,noreferrer');
+      });
+
+      saveNotesBtn?.addEventListener('click', async () => {
+        if (!ensureMeetingOrToast()) return;
+        const strict = summaryStrictToggle && summaryStrictToggle.checked ? '1' : '0';
+        try{
+          const r = await fetch(`http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/export_notes?strict=${strict}`, { method:'POST' });
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          const j = await r.json();
+          if (!j.ok) throw new Error(j.error || 'save failed');
+          if (j.path && window.api?.revealPath) { try { await window.api.revealPath(j.path); } catch {}
+          }
+          toast(`Saved: ${j.filename}`, 'ok');
+        }catch(e){ toast(`Save failed: ${e.message}`, 'error'); }
+      });
+
+      saveDocxBtn?.addEventListener('click', async () => {
+        if (!ensureMeetingOrToast()) return;
+        const strict = summaryStrictToggle && summaryStrictToggle.checked ? '1' : '0';
+        try{
+          const r = await fetch(`http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/export_notes_docx?strict=${strict}`, { method:'POST' });
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          const j = await r.json();
+          if (!j.ok) throw new Error(j.error || 'save failed');
+          if (j.path && window.api?.revealPath) { try { await window.api.revealPath(j.path); } catch {}
+          }
+          toast(`Saved: ${j.filename}`, 'ok');
+        }catch(e){ toast(`DOCX save failed: ${e.message}`, 'error'); }
       });
 
       regenSummaryBtn?.addEventListener('click', () => {
@@ -1129,22 +1199,8 @@
       }
 
       // ---------------------------------------------------------------------
-      // Dump last 5s (manual) + Manual transcribe button
+      // Manual transcribe button
       // ---------------------------------------------------------------------
-      const dumpBtn=document.getElementById('dumpBtn');
-      const dumpStatus=document.getElementById('dumpStatus');
-      dumpBtn.addEventListener('click', async ()=>{
-        dumpStatus.textContent='Saving…';
-        try{
-          const res=await fetch('http://127.0.0.1:8000/v1/dump_wav?seconds=5');
-          if(!res.ok) throw new Error('HTTP '+res.status);
-          const data=await res.json();
-          if(!data.ok) throw new Error(data.message||'Unknown error');
-          dumpStatus.textContent='Saved: '+data.filename;
-          if(window.api?.revealPath){ try{ await window.api.revealPath(data.path);}catch{} }
-          toast(`Saved ${data.filename}`, 'ok');
-        }catch(e){ dumpStatus.textContent='Save failed: '+e.message; toast(`Error: ${e.message}`, 'error'); }
-      });
 
       const manualBtn=document.getElementById('manualTranscribeBtn');
       const manualLabel=document.getElementById('manualTrStatus');
@@ -1164,20 +1220,7 @@
         }catch(e){ console.error(e); manualLabel.textContent='Failed: '+e.message; toast(`Error: ${e.message}`, 'error'); }
       });
 
-      // ---------------------------------------------------------------------
-      // Echo IPC demo (Renderer → Main → Worker) — cheap connectivity test
-      // ---------------------------------------------------------------------
-      const echoInput=document.getElementById("echoInput");
-      const echoBtn=document.getElementById("echoBtn");
-      const echoOut=document.getElementById("echoOut");
-      echoBtn.addEventListener("click", async ()=>{
-        echoOut.textContent="…";
-        try{
-          const msg=echoInput.value||"hello";
-          const res=await window.api.echo(msg);
-          echoOut.textContent=(res&&typeof res.echo!=="undefined")?String(res.echo):JSON.stringify(res);
-        }catch{ echoOut.textContent="error"; }
-      });
+      // Echo demo removed for a cleaner UI
 
       // ---------------------------------------------------------------------
       // Boot sequence
@@ -1192,6 +1235,7 @@
         await refreshServerMeetingStatus();    // show server status early
         const online=await waitForWorkerOnline();
         if(online){
+          await updateWorkerStatus();
           // Load meetings now that worker is online
           await fetchMeetingList().catch(()=>{});
           // Re-send auto config now that worker is online
@@ -1206,10 +1250,11 @@
           await refreshCaptureStatus();
           startTranscriptPolling();            // will only render if activeMeetingId is set
         }else{
+          if(workerStatus){ workerStatus.textContent='Offline'; workerStatus.style.color='var(--bad)'; }
           deviceHelp.textContent="Worker not ready. Try Refresh devices.";
         }
         // Light polling to keep server status badge fresh
-        setInterval(()=>{ refreshServerMeetingStatus().catch(()=>{}); }, 5000);
+        setInterval(()=>{ refreshServerMeetingStatus().catch(()=>{}); updateWorkerStatus().catch(()=>{}); }, 5000);
       })();
 
       // Hook capture start/stop to backend + begin/stop polling loops

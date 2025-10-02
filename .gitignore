@@ -31,3 +31,7 @@ dist/
 
 # Ignore SQLite database
 *.db
+
+# Exports
+exports/
+worker/exports/
