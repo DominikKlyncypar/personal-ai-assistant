@@ -1,0 +1,85 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "app/**"
+      - "worker/**"
+      - ".github/workflows/release-windows.yml"
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Node dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Prepare worker virtualenv (Windows)
+        working-directory: worker
+        shell: pwsh
+        run: |
+          if (Test-Path ".venv") {
+            Remove-Item ".venv" -Recurse -Force
+          }
+          python -m venv .venv
+          .\.venv\Scripts\python -m pip install --upgrade pip
+          .\.venv\Scripts\pip install -r requirements.txt
+
+      - name: Bump build version
+        id: version
+        working-directory: app
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $base = "$($pkg.version)"
+          $parts = $base.Split('.')
+          if ($parts.Length -lt 2) {
+            throw "Unexpected version format: $base"
+          }
+          $major = $parts[0]
+          $minor = $parts[1]
+          $build = "${{ github.run_number }}"
+          $newVersion = "$major.$minor.$build"
+          npm version --no-git-tag-version --allow-same-version $newVersion
+          echo "version=$newVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Build & publish Windows installer
+        working-directory: app
+        env:
+          USE_HARD_LINKS: "false"
+        run: npm run dist:publish
+
+      - name: Upload dist artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-dist
+          path: |
+            app/dist/*.exe
+            app/dist/*.yml
+            app/dist/*.blockmap

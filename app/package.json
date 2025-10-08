@@ -5,20 +5,80 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:publish": "electron-builder --win --publish always",
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx,json,css,md}\"",
     "lint": "eslint src/**/*.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "build": {
+    "appId": "com.dominikklyncypar.personalassistant",
+    "productName": "Personal AI Assistant",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../worker",
+        "to": "worker",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.pyo",
+          "!**/*.pyd",
+          "!**/*.whl",
+          "!tmp/**",
+          "!tests/**",
+          "!exports/**"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "worker/**/*.py",
+      "worker/**/*.json",
+      "worker/**/*.bin"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "DominikKlyncypar",
+        "repo": "personal-ai-assistant"
+      }
+    ]
+  },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
     "electron": "^37.2.6",
+    "electron-builder": "^26.0.12",
     "eslint": "^9.33.0",
     "globals": "^16.3.0",
     "prettier": "^3.6.2"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "zod": "^3.23.8"
   }
 }

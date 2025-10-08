@@ -1,0 +1,12 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.9.2
+pydantic-settings==2.6.1
+numpy==1.26.4
+soundfile==0.12.1
+sounddevice==0.4.7
+python-multipart==0.0.9
+webrtcvad==2.0.10
+faster-whisper==1.1.1
+python-docx==1.1.2
+tqdm==4.66.5

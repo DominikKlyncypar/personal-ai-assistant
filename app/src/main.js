@@ -4,6 +4,7 @@ const fs = require('fs')
 
 // 1. Import the app (controls app lifecycle) and BrowserWindow (creates windows)
 const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { autoUpdater } = require('electron-updater')
 let workerProc = null
 
 function resolvePython(workerDir) {
@@ -21,11 +22,20 @@ function resolvePython(workerDir) {
   return { cmd: 'python3', args: [] }
 }
 
-function startWorker() {
-  // __dirname is .../app/src
-  const repoRoot = path.join(__dirname, '..')          // .../app
-  const workerDir = path.join(repoRoot, '..', 'worker')// .../worker
+function getWorkerDir() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'worker')
+  }
+  return path.join(__dirname, '..', '..', 'worker')
+}
 
+function startWorker() {
+  const workerDir = getWorkerDir()
+
+  if (!fs.existsSync(workerDir)) {
+    console.error(`[worker] directory not found at ${workerDir}`)
+    return
+  }
   const py = resolvePython(workerDir)
   const modelDir = path.join(workerDir, 'models', 'faster-whisper-base')
   const modelBin = path.join(modelDir, 'model.bin')
@@ -41,9 +51,9 @@ function startWorker() {
       env: {
         ...process.env,
         // Only point to local model if the required files are present
-        ...(hasLocalModel ? { WORKER_WHISPER_MODEL_DIR: modelDir } : {}),
+        ...(hasLocalModel ? { WORKER_WHISPER_MODEL_DIR: modelDir } : {})
       },
-      stdio: 'inherit',          // pipe logs to Electron terminal
+      stdio: 'inherit' // pipe logs to Electron terminal
     }
   )
 
@@ -57,7 +67,7 @@ let win = null
 // 2. A function to create our window
 function createWindow() {
   // Create a new BrowserWindow object with size
-  const win = new BrowserWindow({
+  win = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -70,6 +80,55 @@ function createWindow() {
 
   // Load a local HTML file into the window
   win.loadFile(path.join(__dirname, 'index.html'))
+  return win
+}
+
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    if (process.env.DEBUG_AUTO_UPDATE) {
+      console.log('[auto-updater] skipped (development build)')
+    }
+    return
+  }
+
+  autoUpdater.logger = {
+    info: (...args) => console.log('[auto-updater]', ...args),
+    warn: (...args) => console.warn('[auto-updater]', ...args),
+    error: (...args) => console.error('[auto-updater]', ...args),
+    debug: (...args) => console.debug('[auto-updater]', ...args)
+  }
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', info => {
+    console.log('[auto-updater] Update available:', info?.version ?? 'unknown version')
+  })
+  autoUpdater.on('update-not-available', () => {
+    console.log('[auto-updater] No update available')
+  })
+  autoUpdater.on('update-downloaded', info => {
+    console.log('[auto-updater] Update downloaded:', info?.version ?? 'unknown version', '— installing on quit')
+    try {
+      autoUpdater.quitAndInstall(false, true)
+    } catch (err) {
+      console.error('[auto-updater] quitAndInstall failed', err)
+    }
+  })
+  autoUpdater.on('error', err => {
+    console.error('[auto-updater] Auto-update failed', err)
+  })
+
+  const checkForUpdates = () => {
+    autoUpdater.checkForUpdates().catch(err => {
+      console.error('[auto-updater] checkForUpdates failed', err)
+    })
+  }
+
+  checkForUpdates()
+  const interval = Number(process.env.AUTO_UPDATE_INTERVAL_MS ?? 60 * 60 * 1000)
+  if (interval > 0) {
+    setInterval(checkForUpdates, interval)
+  }
 }
 
 // 3. Handle IPC messages from the renderer process
@@ -102,7 +161,8 @@ ipcMain.handle('reveal-path', async (_evt, absPath) => {
 // 4. Wait until Electron is ready, then create the window
 app.whenReady().then(() => {
   startWorker()
-  createWindow()
+  win = createWindow()
+  setupAutoUpdater()
 
   // On macOS, re-create a window when clicking the dock icon if none are open
   app.on('activate', () => {
