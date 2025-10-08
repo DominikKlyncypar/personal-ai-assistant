@@ -11,7 +11,8 @@ client = TestClient(app)
 
 def test_meeting_export_endpoints_exist():
     # Create a meeting
-    r = client.post("/v1/meeting/new", params={"title": "Test"})
+    title = "Test"
+    r = client.post("/v1/meeting/new", params={"title": title})
     assert r.status_code == 200
     mid = r.json()["meeting_id"]
 
@@ -24,5 +25,5 @@ def test_meeting_export_endpoints_exist():
     # Markdown export
     rm = client.get(f"/v1/meeting/{mid}/export.md")
     assert rm.status_code == 200
-    assert rm.text.startswith("# Meeting")
-
+    first_line = rm.text.splitlines()[0]
+    assert first_line == f"# {title}"
