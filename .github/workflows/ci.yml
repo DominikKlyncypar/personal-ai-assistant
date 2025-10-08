@@ -18,13 +18,13 @@ jobs:
       - name: Install system libs
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsndfile1
+          sudo apt-get install -y libsndfile1 libportaudio2
       - name: Install deps
         run: |
           python -m venv .venv
           source .venv/bin/activate
           pip install --upgrade pip
-          pip install fastapi uvicorn[standard] starlette pydantic pydantic-settings soundfile numpy pytest httpx python-multipart webrtcvad
+          pip install -r requirements.txt
       - name: Run tests
         env:
           PYTHONPATH: .
