@@ -16,7 +16,7 @@ jobs:
     permissions:
       contents: write
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: "false"
     steps:
       - uses: actions/checkout@v4
