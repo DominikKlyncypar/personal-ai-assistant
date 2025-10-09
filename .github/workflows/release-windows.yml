@@ -63,8 +63,16 @@ jobs:
           }
           $major = $parts[0]
           $minor = $parts[1]
-          $build = "${{ github.run_number }}"
-          $newVersion = "$major.$minor.$build"
+          $patch = if ($parts.Length -ge 3) { [int]$parts[2] } else { 0 }
+          if ($patch -gt 0) {
+            $newVersion = "$major.$minor.$patch"
+            Write-Host "Using manually specified patch version $newVersion from package.json"
+          }
+          else {
+            $build = "${{ github.run_number }}"
+            $newVersion = "$major.$minor.$build"
+            Write-Host "Auto-bumping patch to $newVersion using workflow run number"
+          }
           npm version --no-git-tag-version --allow-same-version $newVersion
           echo "version=$newVersion" >> $env:GITHUB_OUTPUT
 

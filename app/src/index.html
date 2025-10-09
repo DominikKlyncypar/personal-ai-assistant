@@ -18,13 +18,27 @@
             img-src 'self' data:;
           ">
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function(){
+        try{
+          var storageKey = 'ui.theme';
+          var stored = window.localStorage ? localStorage.getItem(storageKey) : null;
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored || (prefersDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+        }catch(err){
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
 
     <!--
-      Minimal design system (dark by default, light via prefers-color-scheme)
+      Minimal design system (dark by default; user toggle switches data-theme)
       Keep all styles here so this file is copy-paste friendly.
     -->
     <style>
       :root{
+        color-scheme: dark;
         --bg: #0b0c10;
         --panel: #111218;
         --panel-2:#0e1015;
@@ -38,20 +52,34 @@
         --shadow: 0 8px 24px rgba(0,0,0,0.35);
         --radius: 14px;
       }
-      @media (prefers-color-scheme: light){
-        :root{
-          --bg:#f6f8fb;
-          --panel:#ffffff;
-          --panel-2:#fdfefe;
-          --muted:#54606e;
-          --text:#10131a;
-          --brand:#0ea5e9;
-          --brand-2:#2563eb;
-          --ok:#15803d;
-          --bad:#b91c1c;
-          --border: rgba(0,0,0,0.08);
-          --shadow: 0 8px 24px rgba(0,0,0,0.08);
-        }
+      :root[data-theme="dark"]{
+        color-scheme: dark;
+        --bg: #0b0c10;
+        --panel: #111218;
+        --panel-2:#0e1015;
+        --muted:#a9b1bb;
+        --text:#e8ecf1;
+        --brand:#6ee7ff;
+        --brand-2:#3fb4ff;
+        --ok:#26a269;
+        --bad:#c01c28;
+        --border: rgba(255,255,255,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.35);
+        --radius: 14px;
+      }
+      :root[data-theme="light"]{
+        color-scheme: light;
+        --bg:#f6f8fb;
+        --panel:#ffffff;
+        --panel-2:#fdfefe;
+        --muted:#54606e;
+        --text:#10131a;
+        --brand:#0ea5e9;
+        --brand-2:#2563eb;
+        --ok:#15803d;
+        --bad:#b91c1c;
+        --border: rgba(0,0,0,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.08);
       }
 
       *{box-sizing:border-box}
@@ -203,6 +231,7 @@
           </div>
         </div>
         <div class="row">
+          <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode">Toggle theme</button>
           <span class="muted">Worker:</span>
           <span id="workerStatus" class="status muted">Checking…</span>
         </div>
@@ -449,6 +478,58 @@
     <!-- Keep IDs stable so we can iterate without breaking.                   -->
     <!-- ===================================================================== -->
     <script>
+      // ---------------------------------------------------------------------
+      // Theme toggle (light / dark) with local persistence
+      // ---------------------------------------------------------------------
+      const themeToggleBtn = document.getElementById('themeToggle');
+      const themeStorageKey = 'ui.theme';
+      let currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+
+      function setTheme(theme, { persist = true } = {}) {
+        const normalized = theme === 'light' ? 'light' : 'dark';
+        currentTheme = normalized;
+        document.documentElement.setAttribute('data-theme', normalized);
+        if (persist) {
+          try {
+            localStorage.setItem(themeStorageKey, normalized);
+          } catch (_) {
+            /* ignore storage failures */
+          }
+        }
+        if (themeToggleBtn) {
+          const label = normalized === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+          themeToggleBtn.textContent = label;
+          themeToggleBtn.setAttribute('aria-label', label);
+        }
+      }
+
+      // Sync initial toggle label without re-persisting
+      setTheme(currentTheme, { persist: false });
+
+      if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+          const next = currentTheme === 'dark' ? 'light' : 'dark';
+          setTheme(next);
+        });
+      }
+
+      const systemThemeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      if (systemThemeMedia) {
+        const handleSchemeChange = (event) => {
+          try {
+            if (localStorage.getItem(themeStorageKey)) return; // respect manual selection
+          } catch (_) {
+            /* ignore access issues */
+          }
+          setTheme(event.matches ? 'dark' : 'light', { persist: false });
+        };
+        if (typeof systemThemeMedia.addEventListener === 'function') {
+          systemThemeMedia.addEventListener('change', handleSchemeChange);
+        } else if (typeof systemThemeMedia.addListener === 'function') {
+          systemThemeMedia.addListener(handleSchemeChange);
+        }
+      }
+
       // ---------------------------------------------------------------------
       // Small helpers
       // ---------------------------------------------------------------------
