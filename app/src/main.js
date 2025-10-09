@@ -52,6 +52,7 @@ function startWorker() {
   const modelBin = path.join(modelDir, 'model.bin')
   const modelCfg = path.join(modelDir, 'config.json')
   const hasLocalModel = fs.existsSync(modelBin) && fs.existsSync(modelCfg)
+  log.info('[worker] using python command:', py.cmd, py.args)
 
   // Command: python -m uvicorn src.app:app --port 8000
   workerProc = spawn(
@@ -64,12 +65,25 @@ function startWorker() {
         // Only point to local model if the required files are present
         ...(hasLocalModel ? { WORKER_WHISPER_MODEL_DIR: modelDir } : {})
       },
-      stdio: 'inherit' // pipe logs to Electron terminal
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true
     }
   )
 
+  workerProc.stdout.on('data', chunk => {
+    const msg = chunk.toString().trim()
+    if (msg) log.info('[worker:stdout]', msg)
+  })
+  workerProc.stderr.on('data', chunk => {
+    const msg = chunk.toString().trim()
+    if (msg) log.error('[worker:stderr]', msg)
+  })
+
   workerProc.on('exit', (code, signal) => {
     log.error(`[worker] exited with code=${code} signal=${signal}`)
+  })
+  workerProc.on('error', err => {
+    log.error('[worker] failed to spawn process', err)
   })
 }
 
