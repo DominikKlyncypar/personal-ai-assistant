@@ -598,6 +598,18 @@
       let serverMeetingId = null;  // server-reported active meeting
       const meetingMetaById = Object.create(null); // { id: {created_at, title} }
 
+      function meetingDisplayLabel(id, meta, { whenMissingId = 'none', whenMissingMeta = 'selected' } = {}) {
+        if (id === null || id === undefined) return whenMissingId;
+        const title = (meta?.title || '').trim();
+        if (title) return title;
+        const createdAt = (meta?.created_at || '').trim();
+        if (createdAt) return createdAt;
+        if (typeof id === 'number' && Number.isFinite(id)) return `#${id}`;
+        const asStr = String(id || '').trim();
+        if (asStr) return asStr;
+        return whenMissingMeta;
+      }
+
       function resetTranscriptViewFor(meetingId) {
         sinceIdByMeeting[meetingId || 0] = 0;
         transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
@@ -629,11 +641,25 @@
         const el = document.getElementById('meetingStatus');
         if (!el) return;
         const clientMeta = activeMeetingId ? meetingMetaById[activeMeetingId] : null;
-        const clientTxt = activeMeetingId ? (clientMeta && clientMeta.created_at ? clientMeta.created_at : 'selected') : 'none';
-        const serverMeta = serverMeetingId ? meetingMetaById[serverMeetingId] : null;
-        const serverTxt = (serverMeetingId || serverMeetingId === 0)
-          ? (serverMeetingId ? (serverMeta && serverMeta.created_at ? serverMeta.created_at : `selected`) : 'none')
-          : '…';
+        const clientTxt = meetingDisplayLabel(
+          activeMeetingId,
+          clientMeta,
+          { whenMissingId: 'none', whenMissingMeta: 'selected' }
+        );
+        const hasServerId = serverMeetingId !== null && serverMeetingId !== undefined;
+        const serverMeta = hasServerId && serverMeetingId ? meetingMetaById[serverMeetingId] : null;
+        let serverTxt;
+        if (!hasServerId) {
+          serverTxt = '…';
+        } else if (serverMeetingId === 0) {
+          serverTxt = 'none';
+        } else {
+          serverTxt = meetingDisplayLabel(
+            serverMeetingId,
+            serverMeta,
+            { whenMissingId: 'none', whenMissingMeta: 'selected' }
+          );
+        }
         const mismatch = !!(activeMeetingId && serverMeetingId && activeMeetingId !== serverMeetingId);
         el.textContent = `Active: ${clientTxt} (server: ${serverTxt}${mismatch ? ' !' : ''})`;
         if (activeMeetingId) el.classList.remove('muted'); else el.classList.add('muted');
@@ -669,7 +695,9 @@
           placeholder.textContent = '(select a meeting)';
           meetingSelect.appendChild(placeholder);
           j.items.forEach(it => {
-            meetingMetaById[it.id] = { created_at: it.created_at || '', title: it.title || '' };
+            const createdAt = typeof it.created_at === 'string' ? it.created_at.trim() : '';
+            const title = typeof it.title === 'string' ? it.title.trim() : '';
+            meetingMetaById[it.id] = { created_at: createdAt, title };
             const opt = document.createElement('option');
             opt.value = String(it.id);
             opt.textContent = labelForMeeting(it);
@@ -704,7 +732,11 @@
         const val = meetingSelect && meetingSelect.value;
         const id = val ? Number(val) : (activeMeetingId || null);
         if (!id) { toast('Select a meeting first', 'warn'); return; }
-        const label = meetingMetaById[id]?.created_at || `#${id}`;
+        const label = meetingDisplayLabel(
+          id,
+          meetingMetaById[id],
+          { whenMissingId: `#${id}`, whenMissingMeta: `#${id}` }
+        );
         const ok = confirm(`Delete meeting (${label}) and all its transcripts? This cannot be undone.`);
         if (!ok) return;
         try {
@@ -764,15 +796,26 @@
 
           // FLEXIBLE: accept either {meeting_id} or {id}
           const id = getIdFlexible(j);
-          if (!j?.ok || !id) throw new Error('No id returned');
+          if (!j?.ok || id === null || id === undefined) throw new Error('No id returned');
+
+          const createdAtResp = j?.meeting?.created_at ?? j?.created_at ?? meetingMetaById[id]?.created_at ?? '';
+          const titleResp = j?.meeting?.title ?? j?.title ?? title;
+          meetingMetaById[id] = {
+            created_at: typeof createdAtResp === 'string' ? createdAtResp.trim() : '',
+            title: typeof titleResp === 'string' ? titleResp.trim() : ''
+          };
 
           saveActiveMeetingId(id);     // Make it the current meeting in the UI
           if (transcriptBox) transcriptBox.innerHTML = '<em>No transcripts yet.</em>';
           if (activeMeetingId) sinceIdByMeeting[activeMeetingId] = 0;
           restartTranscriptPolling();  // refresh list for the (new) meeting
           refreshServerMeetingStatus().catch(()=>{});
-          const m = meetingMetaById[id];
-          toast(`Created meeting: ${(m && m.created_at) ? m.created_at : 'New'}`);
+          const label = meetingDisplayLabel(
+            id,
+            meetingMetaById[id],
+            { whenMissingId: 'New meeting', whenMissingMeta: 'New meeting' }
+          );
+          toast(`Created meeting: ${label}`);
           // Refresh meeting list so the new one appears in the dropdown
           fetchMeetingList().catch(()=>{});
         } catch (e) {

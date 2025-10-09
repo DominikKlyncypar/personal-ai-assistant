@@ -25,3 +25,7 @@ Phase 0 complete:
   3. Package: `cd app && npm run dist:win`
 - GitHub Actions workflow `.github/workflows/release-windows.yml` builds the Windows installer and publishes a release on every push to `main` (and on manual dispatch). Each run bumps the patch version using the workflow run number and uploads installers to GitHub Releases so that shipped builds auto-update.
 - To enable publishing from your local machine set `GH_TOKEN` with a GitHub PAT and run `npm run dist:publish`.
+
+## Releases
+
+- Latest: [1.1.0](CHANGELOG.md#110---2025-10-08) — capitalized/deduped meeting summaries, meeting name status badge, and resilient auto-transcribe fail-stop overlap.

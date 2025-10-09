@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -42,6 +42,37 @@ def _take_latest_samples(state: State, seconds: float) -> Tuple[np.ndarray, int]
     if mono.shape[0] > n:
         mono = mono[-n:]
     return mono.astype(np.float32, copy=False), sr
+
+
+def _queue_auto_transcribe(
+    state: State,
+    seg_seconds: float,
+    now: float,
+    *,
+    respect_window: bool = True,
+    hard_limit: Optional[float] = None,
+) -> bool:
+    if seg_seconds <= 0:
+        return False
+    if not state.auto_transcribe:
+        return False
+    if state.auto_busy:
+        return False
+    if (now - state.last_trigger_ts) < state.auto_gap_s:
+        return False
+
+    max_secs = min(state.buffer_seconds, seg_seconds)
+    if respect_window:
+        max_secs = min(max_secs, state.auto_window_s)
+    if hard_limit is not None:
+        max_secs = min(max_secs, hard_limit)
+    if max_secs <= 0:
+        return False
+
+    seg_len = max(1, int(round(max_secs)))
+    state.auto_busy = True
+    threading.Thread(target=_async_auto_transcribe, args=(state, seg_len), daemon=True).start()
+    return True
 
 
 def _async_auto_transcribe(state: State, seconds: int):
@@ -90,7 +121,7 @@ def vad_check(state: State, settings: Settings, ng: float = -40.0, vad: int = 3)
             "silence_frames": int(state.vad.silence_frames),
             "ms_since_voice": int((now - (state.vad.last_voice_ts or now)) * 1000.0),
             "raw_is_speech_frame": False,
-            "events": {"started": False, "ended": False},
+            "events": {"started": False, "ended": False, "failstop": False},
         }
 
     recent_16k = _resample_mono_f32(recent, sr, settings.vad_samplerate)
@@ -108,7 +139,7 @@ def vad_check(state: State, settings: Settings, ng: float = -40.0, vad: int = 3)
             "silence_frames": int(state.vad.silence_frames),
             "ms_since_voice": int((now - (state.vad.last_voice_ts or now)) * 1000.0),
             "raw_is_speech_frame": False,
-            "events": {"started": False, "ended": False},
+            "events": {"started": False, "ended": False, "failstop": False},
         }
 
     frame = recent_16k[-frame_len:]
@@ -137,6 +168,7 @@ def vad_check(state: State, settings: Settings, ng: float = -40.0, vad: int = 3)
 
     just_started = False
     just_ended = False
+    failstop_triggered = False
 
     if not state.vad.speech_active and state.vad.speech_frames >= 2:
         state.vad.speech_active = True
@@ -145,16 +177,44 @@ def vad_check(state: State, settings: Settings, ng: float = -40.0, vad: int = 3)
         state.vad.last_voice_ts = now
 
     if state.vad.speech_active:
+        seg_start = state.vad.segment_start_ts or now
+        segment_duration = now - seg_start
+
+        if state.auto_failstop_s > 0 and segment_duration >= state.auto_failstop_s:
+            if _queue_auto_transcribe(
+                state,
+                segment_duration,
+                now,
+                respect_window=False,
+                hard_limit=state.auto_failstop_s,
+            ):
+                failstop_triggered = True
+                overlap = max(
+                    0.0,
+                    min(
+                        float(state.auto_failstop_overlap_s),
+                        float(state.auto_failstop_s),
+                        float(state.buffer_seconds),
+                    ),
+                )
+                state.vad.segment_start_ts = now - overlap if overlap > 0 else now
+                state.vad.last_voice_ts = now
+                state.vad.speech_frames = 0
+                state.vad.silence_frames = 0
+                seg_start = state.vad.segment_start_ts or now
+                segment_duration = max(0.0, now - seg_start)
+
         last_voice = state.vad.last_voice_ts or now
         ms_since_voice = (now - last_voice) * 1000.0
         if ms_since_voice >= settings.vad_hangover_ms:
             state.vad.speech_active = False
             just_ended = True
-            seg_start = state.vad.segment_start_ts or now
-            seg_len = int(max(1, min(state.auto_window_s, state.buffer_seconds, now - seg_start)))
-            if state.auto_transcribe and (now - state.last_trigger_ts) >= state.auto_gap_s and not state.auto_busy:
-                state.auto_busy = True
-                threading.Thread(target=_async_auto_transcribe, args=(state, seg_len), daemon=True).start()
+            seg_start = state.vad.segment_start_ts or seg_start
+            segment_duration = now - seg_start
+            _queue_auto_transcribe(state, segment_duration, now)
+            state.vad.segment_start_ts = None
+            state.vad.speech_frames = 0
+            state.vad.silence_frames = 0
 
     return {
         "ok": True,
@@ -166,5 +226,5 @@ def vad_check(state: State, settings: Settings, ng: float = -40.0, vad: int = 3)
         "speech_frames": int(state.vad.speech_frames),
         "silence_frames": int(state.vad.silence_frames),
         "ms_since_voice": int((now - (state.vad.last_voice_ts or now)) * 1000.0),
-        "events": {"started": just_started, "ended": just_ended},
+        "events": {"started": just_started, "ended": just_ended, "failstop": failstop_triggered},
     }

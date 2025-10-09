@@ -52,6 +52,8 @@ class State:
     auto_transcribe: bool = False
     auto_window_s: int = 60
     auto_gap_s: float = 2.5
+    auto_failstop_s: int = 180
+    auto_failstop_overlap_s: float = 2.0
     auto_busy: bool = False
     last_trigger_ts: float = 0.0
 

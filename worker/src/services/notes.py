@@ -4,7 +4,7 @@ import json
 import os
 import re
 import ssl
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from urllib import request, error
 
 
@@ -36,6 +36,26 @@ def _truncate_text(t: str, max_chars: int = 12000) -> str:
     return t[: max_chars - 1000] + "\n...[truncated]...\n" + t[-1000:]
 
 
+def _bullet_norm_key(text: str) -> str:
+    text = text.strip().lower()
+    if not text:
+        return ""
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def _ensure_leading_capital(text: str) -> str:
+    if not text:
+        return text
+    chars = list(text)
+    for idx, ch in enumerate(chars):
+        if ch.isalpha():
+            chars[idx] = ch.upper()
+            return "".join(chars)
+    if chars:
+        chars[0] = chars[0].upper()
+    return "".join(chars)
+
+
 def _heuristic_notes(text: str) -> str:
     # Very simple fallback: split sentences, keep informative ones, group by type
     sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -58,10 +78,40 @@ def _heuristic_notes(text: str) -> str:
         if len(key_points) >= 12:
             break
 
-    def bullets(lines: List[str]) -> str:
-        if not lines:
-            return "- (none)"
-        return "\n".join(f"- {l}" for l in lines[:15])
+    used_norms: Set[str] = set()
+
+    action_norms: Set[str] = set()
+    for a in actions:
+        norm = _bullet_norm_key(a)
+        if norm:
+            action_norms.add(norm)
+    decision_norms: Set[str] = set()
+    for d in decisions:
+        norm = _bullet_norm_key(d)
+        if norm:
+            decision_norms.add(norm)
+    conflicting_norms = action_norms | decision_norms
+    filtered_key_points: List[str] = []
+    for kp in key_points:
+        norm = _bullet_norm_key(kp)
+        if norm and norm in conflicting_norms:
+            continue
+        filtered_key_points.append(kp)
+    key_points = filtered_key_points
+
+    def bullets(lines: List[str]) -> Optional[str]:
+        items: List[str] = []
+        for l in lines:
+            norm = _bullet_norm_key(l)
+            if not norm or norm in used_norms:
+                continue
+            used_norms.add(norm)
+            items.append(f"- {_ensure_leading_capital(l.strip())}")
+            if len(items) >= 15:
+                break
+        if not items:
+            return None
+        return "\n".join(items)
 
     # Overview: pick the first 2-3 informative sentences as a high-level summary
     overview: List[str] = []
@@ -74,9 +124,15 @@ def _heuristic_notes(text: str) -> str:
     out = []
     if overview:
         out.append("## Overview\n" + " ".join(overview[:3]))
-    out.append("\n## Key Points\n" + bullets(key_points[:8]))
-    out.append("\n## Decisions\n" + bullets(decisions))
-    out.append("\n## Action Items\n" + bullets(actions))
+    kp = bullets(key_points[:8])
+    if kp:
+        out.append("\n## Key Points\n" + kp)
+    dec_lines = bullets(decisions)
+    if dec_lines:
+        out.append("\n## Decisions\n" + dec_lines)
+    act_lines = bullets(actions)
+    if act_lines:
+        out.append("\n## Action Items\n" + act_lines)
     return "\n".join(out)
 
 
@@ -96,6 +152,8 @@ def summarize_with_openai(text: str, model: Optional[str] = None) -> Optional[st
         "- Sections: Overview, Key Points, Decisions, Action Items, Next Steps (omit a section if empty).\n"
         "- Use short bullet points (6-10 items total across sections).\n"
         "- Deduplicate and merge repeated ideas; remove filler and timestamps.\n"
+        "- Ensure every bullet starts with a capitalized word.\n"
+        "- Avoid repeating the same idea across sections; merge or drop duplicates.\n"
         "- Be factual and concise; no speculation; no speaker names unless necessary.\n"
         "- Keep total length under ~350 words.\n\n"
         "Transcript:\n" + _truncate_text(text)
@@ -145,6 +203,8 @@ def summarize_with_groq(text: str, model: Optional[str] = None) -> Optional[str]
         "- Sections: Overview, Key Points, Decisions, Action Items, Next Steps (omit a section if empty).\n"
         "- Use short bullet points (6-10 items total across sections).\n"
         "- Deduplicate and merge repeated ideas; remove filler and timestamps.\n"
+        "- Ensure every bullet starts with a capitalized word.\n"
+        "- Avoid repeating the same idea across sections; merge or drop duplicates.\n"
         "- Be factual and concise; no speculation; no speaker names unless necessary.\n"
         "- Keep total length under ~350 words.\n\n"
         "Transcript:\n" + _truncate_text(text)
@@ -389,6 +449,7 @@ def _reduce_merge_structs(items: List[Dict[str, Any]], strict: bool = False) -> 
         "Merge the following array of per-chunk notes into final JSON.\n"
         "Schema: {points:[], decisions:[], actions:[{item, owner?, due?}]}.\n"
         "- Deduplicate similar items; remove filler and rhetorical lines.\n"
+        "- Prevent repeating the same idea across points, decisions, and actions; merge overlaps.\n"
         + ("- Keep total points 4–8, decisions 0–6, actions 0–8.\n" if strict else "- Keep total points 6–10, decisions 0–8, actions 0–10.\n")
         + "Return JSON only.\n\n"
         + compact
@@ -411,18 +472,31 @@ def _render_notes_from_struct(data: Dict[str, Any], overview: Optional[str] = No
     pts = [p for p in (data.get("points") or []) if isinstance(p, str) and p.strip()]
     dec = [d for d in (data.get("decisions") or []) if isinstance(d, str) and d.strip()]
     acts = [a for a in (data.get("actions") or []) if isinstance(a, dict)]
+    used_norms: Set[str] = set()
+
+    def append_section(title: str, entries: List[str]) -> None:
+        section_lines: List[str] = []
+        for entry in entries:
+            norm = _bullet_norm_key(entry)
+            if not norm or norm in used_norms:
+                continue
+            used_norms.add(norm)
+            section_lines.append(f"- {_ensure_leading_capital(entry.strip())}")
+        if section_lines:
+            lines.append(title)
+            lines.extend(section_lines)
+            lines.append("")
+
     if pts:
-        lines.append("## Key Points")
-        lines.extend(["- " + p.strip() for p in pts])
-        lines.append("")
+        append_section("## Key Points", pts)
     if dec:
-        lines.append("## Decisions")
-        lines.extend(["- " + d.strip() for d in dec])
-        lines.append("")
+        append_section("## Decisions", dec)
     if acts:
-        lines.append("## Action Items")
+        action_lines: List[str] = []
         for a in acts:
             item = (a.get("item") or "").strip()
+            if not item:
+                continue
             owner = (a.get("owner") or "").strip()
             due = (a.get("due") or "").strip()
             suffix = []
@@ -431,9 +505,9 @@ def _render_notes_from_struct(data: Dict[str, Any], overview: Optional[str] = No
             if due:
                 suffix.append(due)
             tail = f" ({', '.join(suffix)})" if suffix else ""
-            if item:
-                lines.append(f"- {item}{tail}")
-        lines.append("")
+            action_lines.append(f"{item}{tail}")
+        if action_lines:
+            append_section("## Action Items", action_lines)
     return "\n".join(lines).strip()
 
 
