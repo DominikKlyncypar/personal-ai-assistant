@@ -51,6 +51,8 @@
         --border: rgba(255,255,255,0.08);
         --shadow: 0 8px 24px rgba(0,0,0,0.35);
         --radius: 14px;
+        --field-bg:#161b24;
+        --field-text:#e8ecf1;
       }
       :root[data-theme="dark"]{
         color-scheme: dark;
@@ -66,6 +68,8 @@
         --border: rgba(255,255,255,0.08);
         --shadow: 0 8px 24px rgba(0,0,0,0.35);
         --radius: 14px;
+        --field-bg:#161b24;
+        --field-text:#e8ecf1;
       }
       :root[data-theme="light"]{
         color-scheme: light;
@@ -80,6 +84,8 @@
         --bad:#b91c1c;
         --border: rgba(0,0,0,0.08);
         --shadow: 0 8px 24px rgba(0,0,0,0.08);
+        --field-bg:#ffffff;
+        --field-text:#10131a;
       }
 
       *{box-sizing:border-box}
@@ -134,11 +140,16 @@
 
       /* Inputs & buttons */
       select, input[type="number"], input[type="text"], input[type="search"]{
-        background: transparent; color:var(--text);
+        background-color: var(--field-bg); color:var(--field-text);
         border:1px solid var(--border);
         border-radius:10px; padding:8px 10px; outline:none;
+        transition: border-color .2s ease, background-color .2s ease, color .2s ease;
       }
       select:focus, input:focus{border-color: var(--brand)}
+      select option{
+        background-color: var(--field-bg);
+        color: var(--field-text);
+      }
       button{
         appearance:none; border:1px solid var(--border); color:var(--text);
         background: linear-gradient(180deg, #1a1d25, #0f1218);
@@ -605,15 +616,15 @@
         let ng = localStorage.getItem('noiseGateDb');
         let vad = localStorage.getItem('vadAgg');
         let autoTr = localStorage.getItem('autoTr') ?? '1'; // default ON
-        let autoTrSec = parseInt(localStorage.getItem('autoTrSec') || '45', 10);
-        if (!Number.isFinite(autoTrSec)) autoTrSec = 45;
+        let autoTrSec = parseInt(localStorage.getItem('autoTrSec') || '180', 10);
+        if (!Number.isFinite(autoTrSec)) autoTrSec = 180;
         autoTrSec = Math.max(5, Math.min(180, autoTrSec));
-        let hangMs = parseInt(localStorage.getItem('vadHangoverMs') || '2500', 10);
-        if (!Number.isFinite(hangMs)) hangMs = 2500;
+        let hangMs = parseInt(localStorage.getItem('vadHangoverMs') || '1000', 10);
+        if (!Number.isFinite(hangMs)) hangMs = 1000;
         hangMs = Math.max(500, Math.min(8000, hangMs));
 
         if (ng === null || ng === '') { ng = '-40'; localStorage.setItem('noiseGateDb', ng); }
-        if (vad === null || vad === '') { vad = '3';   localStorage.setItem('vadAgg', vad); }
+        if (vad === null || vad === '') { vad = '2';   localStorage.setItem('vadAgg', vad); }
 
         noiseGateInput.value = ng;
         vadAggSelect.value = vad;
@@ -631,32 +642,32 @@
       vadAggSelect.addEventListener('change', () => localStorage.setItem('vadAgg', vadAggSelect.value));
       autoTrToggle.addEventListener('change', () => {
         localStorage.setItem('autoTr', autoTrToggle.checked ? '1' : '0');
-        const v = parseInt(localStorage.getItem('autoTrSec') || '45', 10);
-        const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 45));
-        const h = parseInt(localStorage.getItem('vadHangoverMs') || '2500', 10);
-        const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 2500));
+        const v = parseInt(localStorage.getItem('autoTrSec') || '180', 10);
+        const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 180));
+        const h = parseInt(localStorage.getItem('vadHangoverMs') || '1000', 10);
+        const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 1000));
         sendAutoConfig({ enable: autoTrToggle.checked, windowSec: secs, hangoverMs: hang }).catch(()=>{});
       });
       autoTrSecondsInput.addEventListener('change', () => {
-        let v = parseInt(autoTrSecondsInput.value || '45', 10);
-        if (!Number.isFinite(v)) v = 45;
+        let v = parseInt(autoTrSecondsInput.value || '180', 10);
+        if (!Number.isFinite(v)) v = 180;
         v = Math.max(5, Math.min(180, v));
         autoTrSecondsInput.value = String(v);
         localStorage.setItem('autoTrSec', String(v));
-        const h = parseInt(localStorage.getItem('vadHangoverMs') || '2500', 10);
-        const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 2500));
+        const h = parseInt(localStorage.getItem('vadHangoverMs') || '1000', 10);
+        const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 1000));
         sendAutoConfig({ enable: autoTrToggle.checked, windowSec: v, hangoverMs: hang }).catch(()=>{});
         const manualBtnEl = document.getElementById('manualTranscribeBtn');
         if (manualBtnEl) manualBtnEl.textContent = `Transcribe last ${v}s`;
       });
       hangoverInput.addEventListener('change', () => {
-        let h = parseInt(hangoverInput.value || '2500', 10);
-        if (!Number.isFinite(h)) h = 2500;
+        let h = parseInt(hangoverInput.value || '1000', 10);
+        if (!Number.isFinite(h)) h = 1000;
         h = Math.max(500, Math.min(8000, h));
         hangoverInput.value = String(h);
         localStorage.setItem('vadHangoverMs', String(h));
-        const v = parseInt(localStorage.getItem('autoTrSec') || '45', 10);
-        const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 45));
+        const v = parseInt(localStorage.getItem('autoTrSec') || '180', 10);
+        const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 180));
         sendAutoConfig({ enable: autoTrToggle.checked, windowSec: secs, hangoverMs: h }).catch(()=>{});
       });
 
@@ -1114,6 +1125,18 @@
           micSelect.appendChild(opt);
         }
 
+        const defaults = (data && data.defaults) || {};
+        const applyDefault = (selectEl, value) => {
+          if (value === null || value === undefined) return;
+          const val = String(value);
+          const opt = selectEl.querySelector(`option[value="${val}"]`);
+          if (opt) {
+            selectEl.value = val;
+          }
+        };
+        applyDefault(playbackSelect, defaults.output);
+        applyDefault(micSelect, defaults.input);
+
         deviceHelp.textContent = (data.os === "Windows_NT" || data.os === "Windows")
           ? "Tip: choose your Speakers (WASAPI) for loopback capture. Mic is optional."
           : "On macOS, loopback requires a virtual device. Mic works for development.";
@@ -1321,7 +1344,7 @@
       // Auto-transcribe helper
       // Simple 2-step: dump last N seconds → transcribe → refresh list
       // ---------------------------------------------------------------------
-      async function autoTranscribeLast(seconds = 45){
+      async function autoTranscribeLast(seconds = 180){
         if (autoTrBusy || autoTrCooldown) return;
         autoTrBusy = true;
         try{
@@ -1355,8 +1378,8 @@
         manualLabel.textContent='Working…';
         try{
           // Use configured auto window seconds for manual transcribes too
-          const v = parseInt((autoTrSecondsInput && autoTrSecondsInput.value) ? autoTrSecondsInput.value : (localStorage.getItem('autoTrSec') || '45'), 10);
-          const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 45));
+          const v = parseInt((autoTrSecondsInput && autoTrSecondsInput.value) ? autoTrSecondsInput.value : (localStorage.getItem('autoTrSec') || '180'), 10);
+          const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 180));
           const r1=await fetch(`http://127.0.0.1:8000/v1/dump_wav?seconds=${secs}&label=manual`); if(!r1.ok) throw new Error('dump failed');
           const j1=await r1.json(); if(!j1.ok) throw new Error(j1.message||'dump failed');
           const r2=await fetch(`http://127.0.0.1:8000/v1/transcribe_wav?path=${encodeURIComponent(j1.filename)}&language=en${activeMeetingId?`&meeting_id=${activeMeetingId}`:''}`);
@@ -1387,10 +1410,10 @@
           await fetchMeetingList().catch(()=>{});
           // Re-send auto config now that worker is online
           try {
-            const v = parseInt(localStorage.getItem('autoTrSec') || '45', 10);
-            const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 45));
-            const h = parseInt(localStorage.getItem('vadHangoverMs') || '2500', 10);
-            const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 2500));
+            const v = parseInt(localStorage.getItem('autoTrSec') || '180', 10);
+            const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 180));
+            const h = parseInt(localStorage.getItem('vadHangoverMs') || '1000', 10);
+            const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 1000));
             await sendAutoConfig({ enable: document.getElementById('autoTrToggle').checked, windowSec: secs, hangoverMs: hang });
           } catch {}
           await loadDevicesWithRetry();

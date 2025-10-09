@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+import platform
+
 from fastapi import APIRouter, Query, Depends
 
 from ..services import capture as svc
@@ -50,6 +52,31 @@ def list_devices():
     import sounddevice as sd  # lazy import
     info = sd.query_devices()
     hostapis = sd.query_hostapis()
+    try:
+        defaults_raw = sd.default.device
+    except Exception:
+        defaults_raw = (None, None)
+
+    def _norm_default(val):
+        try:
+            if val is None:
+                return None
+            iv = int(val)
+            return iv if iv >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    default_input = None
+    default_output = None
+    if isinstance(defaults_raw, (list, tuple)):
+        if len(defaults_raw) >= 1:
+            default_input = _norm_default(defaults_raw[0])
+        if len(defaults_raw) >= 2:
+            default_output = _norm_default(defaults_raw[1])
+    else:
+        default_input = _norm_default(defaults_raw)
+
+    platform_name = platform.system()
     inputs = []
     outputs = []
     api_names = {i: hostapis[i]["name"] for i in range(len(hostapis))}
@@ -66,12 +93,13 @@ def list_devices():
         if item["max_input_channels"] > 0:
             inputs.append(item)
         if item["max_output_channels"] > 0:
-            import platform
             item_out = dict(item)
-            item_out["loopback_capable"] = platform.system() == "Windows"
+            item_out["loopback_capable"] = platform_name == "Windows"
             outputs.append(item_out)
     return {
         "inputs": inputs,
         "outputs": outputs,
         "hostapis": [h["name"] for h in hostapis],
+        "defaults": {"input": default_input, "output": default_output},
+        "os": platform_name,
     }

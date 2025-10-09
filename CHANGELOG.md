@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.0] - 2025-10-08
+## [1.1.5] - 2025-10-08
 
 ### Added
 - Automatic fail-stop that chunks continuous speech every three minutes and immediately resumes recording with a two-second overlap so no words are lost.
@@ -17,4 +17,3 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - Prevented duplicate bullets when rendering structured summaries and ensured action items include owners/due dates without duplicating decisions.
 - Resolved missing words when speech segments exceed the three minute cap by overlapping chunks.
-
