@@ -39,16 +39,28 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Prepare worker virtualenv (Windows)
+      - name: Bundle Python runtime for worker
         working-directory: worker
         shell: pwsh
         run: |
-          if (Test-Path ".venv") {
-            Remove-Item ".venv" -Recurse -Force
+          $runtimeDir = Join-Path (Get-Location) "python-runtime"
+          if (Test-Path $runtimeDir) {
+            Remove-Item $runtimeDir -Recurse -Force
           }
-          python -m venv .venv
-          .\.venv\Scripts\python -m pip install --upgrade pip
-          .\.venv\Scripts\pip install -r requirements.txt
+          New-Item -ItemType Directory -Path $runtimeDir | Out-Null
+          $src = $env:pythonLocation
+          if (-not (Test-Path $src)) {
+            throw "pythonLocation '$src' not found"
+          }
+          robocopy $src $runtimeDir /MIR /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+          $rc = $LASTEXITCODE
+          if ($rc -ge 8) { exit $rc } else { $global:LASTEXITCODE = 0 }
+          Remove-Item (Join-Path $runtimeDir "Lib\site-packages") -Recurse -Force -ErrorAction SilentlyContinue
+          & (Join-Path $runtimeDir "python.exe") -m pip install --upgrade pip
+          & (Join-Path $runtimeDir "python.exe") -m pip install --no-warn-script-location -r (Join-Path (Get-Location) "requirements.txt")
+          Remove-Item (Join-Path $runtimeDir "Lib\site-packages\pip") -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $runtimeDir "Lib\site-packages\setuptools") -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item (Join-Path $runtimeDir "Lib\site-packages\wheel") -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Bump build version
         id: version

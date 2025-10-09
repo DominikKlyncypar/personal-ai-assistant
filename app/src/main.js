@@ -23,6 +23,16 @@ function resolvePython(workerDir) {
     return { cmd: process.env.WORKER_PYTHON, args: [] }
   }
   const isWin = process.platform === 'win32'
+  const runtimePath = isWin
+    ? path.join(workerDir, 'python-runtime', 'python.exe')
+    : path.join(workerDir, 'python-runtime', 'bin', 'python3')
+  try {
+    if (fs.existsSync(runtimePath)) {
+      return { cmd: runtimePath, args: [] }
+    }
+  } catch (err) {
+    log.warn('[worker] failed to check runtime python', err)
+  }
   const venvPath = isWin
     ? path.join(workerDir, '.venv', 'Scripts', 'python.exe')
     : path.join(workerDir, '.venv', 'bin', 'python')
