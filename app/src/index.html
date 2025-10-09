@@ -232,6 +232,7 @@
         </div>
         <div class="row">
           <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode">Toggle theme</button>
+          <span id="appVersionBadge" class="status muted" title="Application version">v?.?.?</span>
           <span class="muted">Worker:</span>
           <span id="workerStatus" class="status muted">Checking…</span>
         </div>
@@ -528,6 +529,28 @@
         } else if (typeof systemThemeMedia.addListener === 'function') {
           systemThemeMedia.addListener(handleSchemeChange);
         }
+      }
+
+      const appVersionBadge = document.getElementById('appVersionBadge');
+      let appVersion = '?.?.?';
+      let logFileHint = null;
+      if (window.appInfo && typeof window.appInfo.subscribe === 'function') {
+        window.appInfo.subscribe(info => {
+          if (info && typeof info.version === 'string') {
+            appVersion = info.version;
+            if (appVersionBadge) {
+              appVersionBadge.textContent = `v${appVersion}`;
+              appVersionBadge.title = `Application version ${appVersion}`;
+            }
+          }
+          if (info && typeof info.logPath === 'string') {
+            logFileHint = info.logPath;
+            if (appVersionBadge) {
+              appVersionBadge.dataset.logPath = logFileHint;
+              appVersionBadge.title = `Version ${appVersion} • Logs: ${logFileHint}`;
+            }
+          }
+        });
       }
 
       // ---------------------------------------------------------------------

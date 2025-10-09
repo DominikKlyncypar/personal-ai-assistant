@@ -9,3 +9,12 @@ contextBridge.exposeInMainWorld('api', {
   echo: (msg) => { assertString('msg', msg); return ipcRenderer.invoke('echo', msg) },
   revealPath: (absPath) => { assertString('absPath', absPath); return ipcRenderer.invoke('reveal-path', absPath) },
 })
+
+contextBridge.exposeInMainWorld('appInfo', {
+  subscribe: (cb) => {
+    if (typeof cb !== 'function') return () => {}
+    const wrapped = (_event, info) => cb(info || {})
+    ipcRenderer.on('app-info', wrapped)
+    return () => ipcRenderer.removeListener('app-info', wrapped)
+  }
+})
