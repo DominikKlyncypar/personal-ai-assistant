@@ -56,6 +56,7 @@ jobs:
           $rc = $LASTEXITCODE
           if ($rc -ge 8) { exit $rc } else { $global:LASTEXITCODE = 0 }
           Remove-Item (Join-Path $runtimeDir "Lib\site-packages") -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item (Join-Path $env:pythonLocation "Lib\site-packages") -Destination (Join-Path $runtimeDir "Lib") -Recurse -Force
           & (Join-Path $runtimeDir "python.exe") -m pip install --upgrade pip
           & (Join-Path $runtimeDir "python.exe") -m pip install --no-warn-script-location -r (Join-Path (Get-Location) "requirements.txt")
           Remove-Item (Join-Path $runtimeDir "Lib\site-packages\pip") -Recurse -Force -ErrorAction SilentlyContinue
