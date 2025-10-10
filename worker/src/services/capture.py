@@ -278,6 +278,12 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                             name = str(dev_info.get("name") or "")
                         except Exception:
                             name = ""
+                    self.logger.info(
+                        "loopback candidate id=%s name=%r api=%r",
+                        dev_idx,
+                        name,
+                        api_name,
+                    )
                     name_lower = name.lower() if isinstance(name, str) else ""
                     api_lower = api_name.lower() if isinstance(api_name, str) else ""
                     is_loopback = "loopback" in name_lower

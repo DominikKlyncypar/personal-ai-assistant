@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.17] - 2025-10-12
+## [1.1.18] - 2025-10-12
 
 ### Fixed
 - Ensure `start_capture` records last errors for debugging and clears them on successful startups.
