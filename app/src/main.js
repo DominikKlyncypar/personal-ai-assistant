@@ -156,6 +156,16 @@ function startWorker() {
     log.warn('[worker] failed to ensure db directory', err)
   }
 
+  const bundledDbPath = path.join(workerDir, 'src', 'assistant.db')
+  if (!fs.existsSync(dbPath) && fs.existsSync(bundledDbPath)) {
+    try {
+      fs.copyFileSync(bundledDbPath, dbPath)
+      log.info('[worker] migrated bundled assistant.db to user data directory')
+    } catch (err) {
+      log.warn('[worker] failed to migrate bundled assistant.db', err)
+    }
+  }
+
   // Command: python -m uvicorn src.app:app --port 8000
   workerProc = spawn(
     py.cmd,

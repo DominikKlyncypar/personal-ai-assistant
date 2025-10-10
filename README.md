@@ -28,4 +28,4 @@ Phase 0 complete:
 
 ## Releases
 
-- Latest: [1.1.9](CHANGELOG.md#119---2025-10-08) — capitalized/deduped meeting summaries, meeting name status badge, and resilient auto-transcribe fail-stop overlap.
+- Latest: [1.1.10](CHANGELOG.md#1110---2025-10-08) — capitalized/deduped meeting summaries, meeting name status badge, and resilient auto-transcribe fail-stop overlap.
