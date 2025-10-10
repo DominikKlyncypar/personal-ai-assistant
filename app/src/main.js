@@ -149,6 +149,13 @@ function startWorker() {
   const hasLocalModel = fs.existsSync(modelBin) && fs.existsSync(modelCfg)
   log.info('[worker] using python command:', py.cmd, py.args)
 
+  const dbPath = path.join(app.getPath('userData'), 'assistant.db')
+  try {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+  } catch (err) {
+    log.warn('[worker] failed to ensure db directory', err)
+  }
+
   // Command: python -m uvicorn src.app:app --port 8000
   workerProc = spawn(
     py.cmd,
@@ -158,7 +165,8 @@ function startWorker() {
       env: {
         ...process.env,
         // Only point to local model if the required files are present
-        ...(hasLocalModel ? { WORKER_WHISPER_MODEL_DIR: modelDir } : {})
+        ...(hasLocalModel ? { WORKER_WHISPER_MODEL_DIR: modelDir } : {}),
+        WORKER_DB_PATH: dbPath
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true

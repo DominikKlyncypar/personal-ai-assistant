@@ -127,15 +127,9 @@ class Capture:
 
         try:
             info = sd.query_devices(device_id, "output")
-            max_channels = int(info.get("max_output_channels", info.get("max_input_channels", 2)) or 2)
+            max_channels = int(info.get("max_output_channels") or 2)
             if max_channels <= 0:
                 raise RuntimeError("Selected playback device exposes no channels for loopback capture.")
-            try:
-                sd.check_input_settings(device=(device_id, None), channels=max_channels, samplerate=samplerate, dtype="float32")
-            except Exception:
-                sr_default = int(info.get("default_samplerate") or samplerate or 48000)
-                sd.check_input_settings(device=(device_id, None), channels=max_channels, samplerate=sr_default, dtype="float32")
-                samplerate = sr_default
         except Exception as e:
             raise RuntimeError(f"Loopback device not usable: {e}")
 
@@ -143,10 +137,14 @@ class Capture:
         s.blocksize = max(256, int(samplerate * 0.02))
         self._resize_buffer()
 
+        samplerate = int(info.get("default_samplerate") or samplerate or 48000)
+
         try:
             wasapi = sd.WasapiSettings(loopback=True)
         except Exception as e:
             raise RuntimeError(f"WASAPI loopback not available: {e}")
+
+        dev_tuple = (None, device_id)
 
         def callback(indata, frames, time_info, status):
             mono = np.mean(indata, axis=1, dtype=np.float32)
@@ -154,11 +152,9 @@ class Capture:
                 s.last_rms = float(np.sqrt(np.mean(np.square(mono)))) if mono.size else 0.0
                 s.buffer.append(np.array(mono, dtype=np.float32))
 
-        channels = max(1, min(2, int(info.get("max_output_channels", 2) or 2)))
-
         self._start_stream(
-            device=(device_id, None),
-            channels=channels,
+            device=dev_tuple,
+            channels=max(1, min(2, max_channels)),
             samplerate=samplerate,
             blocksize=s.blocksize,
             dtype="float32",

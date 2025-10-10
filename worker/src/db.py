@@ -15,7 +15,12 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 # Path to the SQLite database file (in your repo under src/)
-DB_PATH = Path(__file__).parent / "assistant.db"
+_DB_PATH_ENV = os.getenv("WORKER_DB_PATH")
+if _DB_PATH_ENV:
+    DB_PATH = Path(_DB_PATH_ENV).expanduser()
+else:
+    DB_PATH = Path(__file__).parent / "assistant.db"
+DB_PATH = DB_PATH.resolve()
 
 def get_connection() -> sqlite3.Connection:
     """
@@ -23,7 +28,8 @@ def get_connection() -> sqlite3.Connection:
     - Enables foreign keys (even if we also delete explicitly).
     - Returns rows as tuples by default; we convert to dicts when needed.
     """
-    conn = sqlite3.connect(DB_PATH)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
