@@ -2,14 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.18] - 2025-10-12
+## [1.1.19] - 2025-10-12
+
+### Changed
+- Append host API labels to playback device names so Windows users can pick the WASAPI loopback entry confidently.
+- Treat all Windows WASAPI outputs as loopback-capable so loopback devices are auto-selected.
 
 ### Fixed
 - Ensure `start_capture` records last errors for debugging and clears them on successful startups.
 - Update capture callbacks to increment frame counters and timestamps reliably.
-
-### Changed
-- Treat all Windows WASAPI outputs as loopback-capable so loopback devices are auto-selected.
 
 ## [1.1.11] - 2025-10-09
 

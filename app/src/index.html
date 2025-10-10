@@ -1117,7 +1117,14 @@
         for (const d of data.outputs) {
           const opt = document.createElement("option");
           opt.value = String(d.id);
-          let label = simpleLabels ? d.name : `${d.name} [${d.hostapi}]`;
+          let label = d.name || `Device ${d.id}`;
+          const host = d.hostapi ? String(d.hostapi) : "";
+          if (host && !label.includes(host)) {
+            label += ` [${host}]`;
+          }
+          if (!simpleLabels && !host && d.hostapi) {
+            label += ` [${d.hostapi}]`;
+          }
           if (d.is_loopback && !label.toLowerCase().includes("loopback")) {
             label += " (loopback)";
           }
