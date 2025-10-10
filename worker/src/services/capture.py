@@ -216,7 +216,33 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
         else:
             # Windows: prefer loopback playback when available; fall back to mic
             if playback_id is not None:
-                cap.start_playback_loopback(int(playback_id), samplerate)
+                try:
+                    import sounddevice as sd  # lazy import
+
+                    dev_idx = int(playback_id)
+                    dev_info = sd.query_devices(dev_idx)
+                    hostapis = sd.query_hostapis()
+                    api_idx = dev_info.get("hostapi", -1)
+                    api_name = hostapis[api_idx]["name"] if 0 <= api_idx < len(hostapis) else "unknown"
+                    name = str(dev_info.get("name") or "")
+                    is_loopback = "loopback" in name.lower()
+                    if not is_loopback and "wasapi" in api_name.lower():
+                        # Some WASAPI loopback devices omit the keyword; detect by channel layout
+                        max_in = int(dev_info.get("max_input_channels", 0))
+                        max_out = int(dev_info.get("max_output_channels", 0))
+                        is_loopback = max_in >= 1 and max_out == 0
+                except Exception:
+                    is_loopback = False
+
+                if not is_loopback:
+                    if mic_id is not None:
+                        cap.start_mic(int(mic_id), samplerate)
+                    else:
+                        raise RuntimeError(
+                            "Selected playback device is not a loopback endpoint. Choose the entry marked '(loopback)' or select a microphone."
+                        )
+                else:
+                    cap.start_playback_loopback(int(playback_id), samplerate)
             elif mic_id is not None:
                 cap.start_mic(int(mic_id), samplerate)
             else:
