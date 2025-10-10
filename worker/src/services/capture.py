@@ -122,18 +122,19 @@ class Capture:
             raise RuntimeError("Loopback capture requires Windows (WASAPI).")
         s = self.state.capture
         import sounddevice as sd  # lazy import
-        dev_idx = device_id if (device_id is not None and device_id >= 0) else None
+        if device_id is None or device_id < 0:
+            raise RuntimeError("Select a loopback playback device.")
 
         try:
-            info = sd.query_devices(dev_idx, "input")
-            max_in = int(info.get("max_input_channels", 0))
-            if max_in <= 0:
-                raise RuntimeError("Selected playback device has no loopback channels")
+            info = sd.query_devices(device_id, "output")
+            max_channels = int(info.get("max_output_channels", info.get("max_input_channels", 2)) or 2)
+            if max_channels <= 0:
+                raise RuntimeError("Selected playback device exposes no channels for loopback capture.")
             try:
-                sd.check_input_settings(device=dev_idx, channels=max_in, samplerate=samplerate, dtype="float32")
+                sd.check_input_settings(device=(device_id, None), channels=max_channels, samplerate=samplerate, dtype="float32")
             except Exception:
                 sr_default = int(info.get("default_samplerate") or samplerate or 48000)
-                sd.check_input_settings(device=dev_idx, channels=max_in, samplerate=sr_default, dtype="float32")
+                sd.check_input_settings(device=(device_id, None), channels=max_channels, samplerate=sr_default, dtype="float32")
                 samplerate = sr_default
         except Exception as e:
             raise RuntimeError(f"Loopback device not usable: {e}")
@@ -153,9 +154,11 @@ class Capture:
                 s.last_rms = float(np.sqrt(np.mean(np.square(mono)))) if mono.size else 0.0
                 s.buffer.append(np.array(mono, dtype=np.float32))
 
+        channels = max(1, min(2, int(info.get("max_output_channels", 2) or 2)))
+
         self._start_stream(
-            device=dev_idx,
-            channels=max(1, int(info.get("max_input_channels", 1))),
+            device=(device_id, None),
+            channels=channels,
             samplerate=samplerate,
             blocksize=s.blocksize,
             dtype="float32",

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.7] - 2025-10-08
+## [1.1.8] - 2025-10-08
 
 ### Added
 - Automatic fail-stop that chunks continuous speech every three minutes and immediately resumes recording with a two-second overlap so no words are lost.
