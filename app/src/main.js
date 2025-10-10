@@ -49,6 +49,91 @@ function getWorkerDir() {
   return path.join(__dirname, '..', '..', 'worker')
 }
 
+function mapLogMethod(level, fallback = 'info') {
+  const normalized = typeof level === 'string' ? level.toLowerCase() : ''
+  if (normalized === 'error' || normalized === 'critical' || normalized === 'fatal') {
+    return 'error'
+  }
+  if (normalized === 'warn' || normalized === 'warning') {
+    return 'warn'
+  }
+  if (normalized === 'debug' || normalized === 'trace') {
+    return 'debug'
+  }
+  return fallback
+}
+
+function levelFromLine(str, fallback = 'info') {
+  if (/traceback|exception|error/i.test(str)) return 'error'
+  if (/warn/i.test(str)) return 'warn'
+  if (/debug|trace/i.test(str)) return 'debug'
+  return fallback
+}
+
+function logWorkerLine({ source, line, fallbackLevel }) {
+  const trimmed = line.trim()
+  if (!trimmed) return
+
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed)
+      const { level, message, ...rest } = parsed || {}
+      const method = mapLogMethod(level, mapLogMethod(fallbackLevel))
+      let text = message ?? ''
+      if (typeof text !== 'string') {
+        text = JSON.stringify(text)
+      }
+      const nested = typeof text === 'string' ? text.trim() : ''
+      let parsedMessage = null
+      if (nested.startsWith('{') || nested.startsWith('[')) {
+        try {
+          parsedMessage = JSON.parse(nested)
+        } catch {
+          parsedMessage = null
+        }
+      }
+      const hasRest = rest && Object.keys(rest).length > 0
+      if (parsedMessage) {
+        const payload = `[worker:${source}] ${JSON.stringify(parsedMessage)}`
+        return hasRest
+          ? log[method](payload, rest)
+          : log[method](payload)
+      }
+      if (!text) {
+        return hasRest
+          ? log[method](`[worker:${source}]`, rest)
+          : log[method](`[worker:${source}]`, parsed)
+      }
+      return hasRest
+        ? log[method](`[worker:${source}] ${text}`, rest)
+        : log[method](`[worker:${source}] ${text}`)
+    } catch {
+      // Fall back to string handling below if JSON parsing fails
+    }
+  }
+
+  const method = mapLogMethod(levelFromLine(trimmed, 'info'), mapLogMethod(fallbackLevel))
+  log[method](`[worker:${source}] ${trimmed}`)
+}
+
+function attachWorkerLogger(stream, source, fallbackLevel) {
+  let buffer = ''
+  const flush = () => {
+    if (buffer) {
+      logWorkerLine({ source, line: buffer, fallbackLevel })
+      buffer = ''
+    }
+  }
+  stream.on('data', chunk => {
+    buffer += chunk.toString()
+    const parts = buffer.split(/\r?\n/)
+    buffer = parts.pop() ?? ''
+    parts.forEach(line => logWorkerLine({ source, line, fallbackLevel }))
+  })
+  stream.on('close', flush)
+  stream.on('end', flush)
+}
+
 function startWorker() {
   const workerDir = getWorkerDir()
 
@@ -80,14 +165,8 @@ function startWorker() {
     }
   )
 
-  workerProc.stdout.on('data', chunk => {
-    const msg = chunk.toString().trim()
-    if (msg) log.info('[worker:stdout]', msg)
-  })
-  workerProc.stderr.on('data', chunk => {
-    const msg = chunk.toString().trim()
-    if (msg) log.error('[worker:stderr]', msg)
-  })
+  attachWorkerLogger(workerProc.stdout, 'stdout', 'info')
+  attachWorkerLogger(workerProc.stderr, 'stderr', 'info')
 
   workerProc.on('exit', (code, signal) => {
     log.error(`[worker] exited with code=${code} signal=${signal}`)

@@ -1112,30 +1112,45 @@
         micPlaceholder.textContent = 'Select input…';
         micSelect.appendChild(micPlaceholder);
 
+        const simpleLabels = (data.os === "Windows_NT" || data.os === "Windows");
+
         for (const d of data.outputs) {
           const opt = document.createElement("option");
           opt.value = String(d.id);
-          opt.textContent = `${d.name} [${d.hostapi}]${d.loopback_capable ? " (loopback)" : ""}`;
+          let label = simpleLabels ? d.name : `${d.name} [${d.hostapi}]`;
+          if (d.is_loopback && !label.toLowerCase().includes("loopback")) {
+            label += " (loopback)";
+          }
+          opt.textContent = label;
           playbackSelect.appendChild(opt);
         }
         for (const d of data.inputs) {
           const opt = document.createElement("option");
           opt.value = String(d.id);
-          opt.textContent = `${d.name} [${d.hostapi}]`;
+          opt.textContent = simpleLabels ? d.name : `${d.name} [${d.hostapi}]`;
           micSelect.appendChild(opt);
         }
 
         const defaults = (data && data.defaults) || {};
         const applyDefault = (selectEl, value) => {
-          if (value === null || value === undefined) return;
+          if (value === null || value === undefined) return false;
           const val = String(value);
-          const opt = selectEl.querySelector(`option[value="${val}"]`);
-          if (opt) {
-            selectEl.value = val;
+          for (const opt of selectEl.options) {
+            if (opt.value === val) {
+              selectEl.value = val;
+              return true;
+            }
           }
+          return false;
         };
-        applyDefault(playbackSelect, defaults.output);
-        applyDefault(micSelect, defaults.input);
+        const hasOutputDefault = applyDefault(playbackSelect, defaults.output);
+        const hasInputDefault = applyDefault(micSelect, defaults.input);
+        if (!hasOutputDefault && playbackSelect.options.length > 1) {
+          playbackSelect.selectedIndex = 1;
+        }
+        if (!hasInputDefault && micSelect.options.length > 1) {
+          micSelect.selectedIndex = 1;
+        }
 
         deviceHelp.textContent = (data.os === "Windows_NT" || data.os === "Windows")
           ? "Tip: choose your Speakers (WASAPI) for loopback capture. Mic is optional."

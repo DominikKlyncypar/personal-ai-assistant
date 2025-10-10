@@ -57,28 +57,47 @@ def list_devices():
     except Exception:
         defaults_raw = (None, None)
 
-    def _norm_default(val):
+    def _coerce_device(val):
+        if isinstance(val, int) and 0 <= val < len(info):
+            return val
         try:
-            if val is None:
-                return None
             iv = int(val)
-            return iv if iv >= 0 else None
+            if 0 <= iv < len(info):
+                return iv
         except (TypeError, ValueError):
-            return None
+            pass
+        if isinstance(val, str):
+            for idx, dev in enumerate(info):
+                if str(dev.get("name")) == val:
+                    return idx
+        return None
 
     default_input = None
     default_output = None
     if isinstance(defaults_raw, (list, tuple)):
         if len(defaults_raw) >= 1:
-            default_input = _norm_default(defaults_raw[0])
+            default_input = _coerce_device(defaults_raw[0])
         if len(defaults_raw) >= 2:
-            default_output = _norm_default(defaults_raw[1])
+            default_output = _coerce_device(defaults_raw[1])
     else:
-        default_input = _norm_default(defaults_raw)
+        default_input = _coerce_device(defaults_raw)
+
+    try:
+        default_hostapi = getattr(sd.default, "hostapi", None)
+        if isinstance(default_hostapi, int) and 0 <= default_hostapi < len(hostapis):
+            ha = hostapis[default_hostapi]
+            di = ha.get("default_input_device")
+            do = ha.get("default_output_device")
+            if isinstance(di, int) and di >= 0:
+                default_input = default_input if default_input is not None else di
+            if isinstance(do, int) and do >= 0:
+                default_output = default_output if default_output is not None else do
+    except Exception:
+        pass
 
     platform_name = platform.system()
-    inputs = []
-    outputs = []
+    inputs_raw = []
+    outputs_raw = []
     api_names = {i: hostapis[i]["name"] for i in range(len(hostapis))}
     for idx, dev in enumerate(info):
         dev_api = api_names.get(dev["hostapi"], "unknown")
@@ -89,13 +108,39 @@ def list_devices():
             "max_input_channels": int(dev.get("max_input_channels", 0)),
             "max_output_channels": int(dev.get("max_output_channels", 0)),
             "default_samplerate": float(dev.get("default_samplerate", 48000)),
+            "hostapi": dev_api,
         }
         if item["max_input_channels"] > 0:
-            inputs.append(item)
+            inputs_raw.append(item)
         if item["max_output_channels"] > 0:
             item_out = dict(item)
-            item_out["loopback_capable"] = platform_name == "Windows"
-            outputs.append(item_out)
+            is_loopback = platform_name == "Windows" and "loopback" in item_out["name"].lower()
+            item_out["loopback_capable"] = is_loopback
+            item_out["is_loopback"] = is_loopback
+            outputs_raw.append(item_out)
+
+    def _filter_by_preferred(devices):
+        if platform_name != "Windows":
+            return devices
+        preferred = {"Windows WASAPI"}
+        if any(d["hostapi"] in preferred for d in devices):
+            return [d for d in devices if d["hostapi"] in preferred]
+        return devices
+
+    def _dedupe(devices):
+        seen = set()
+        trimmed = []
+        for d in devices:
+            key = d["name"].strip().lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            trimmed.append(d)
+        return trimmed
+
+    inputs = _dedupe(_filter_by_preferred(inputs_raw))
+    outputs = _dedupe(_filter_by_preferred(outputs_raw))
+
     return {
         "inputs": inputs,
         "outputs": outputs,
