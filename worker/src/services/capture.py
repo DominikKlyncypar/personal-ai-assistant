@@ -138,7 +138,7 @@ class Capture:
 
         channels = max(1, min(2, max_channels))
 
-        self.logger.info(
+        self.logger.debug(
             "start_playback_loopback device=%s hostapi=%s name=%s samplerate=%s channels=%s",
             device_id,
             info.get("hostapi"),
