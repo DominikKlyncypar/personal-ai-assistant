@@ -265,9 +265,19 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                     dev_idx = int(playback_id)
                     dev_info = sd.query_devices(dev_idx)
                     hostapis = sd.query_hostapis()
-                    api_idx = dev_info.get("hostapi", -1)
-                    api_name = hostapis[api_idx]["name"] if 0 <= api_idx < len(hostapis) else "unknown"
-                    name = str(dev_info.get("name") or "")
+                    api_idx = dev_info.get("hostapi", -1) if isinstance(dev_info, dict) else -1
+                    api_name = ""
+                    if 0 <= api_idx < len(hostapis):
+                        try:
+                            api_name = str(hostapis[api_idx].get("name") or "")
+                        except Exception:
+                            api_name = ""
+                    name = ""
+                    if isinstance(dev_info, dict):
+                        try:
+                            name = str(dev_info.get("name") or "")
+                        except Exception:
+                            name = ""
                     is_loopback = "loopback" in name.lower()
                     if not is_loopback and "wasapi" in api_name.lower():
                         is_loopback = True
