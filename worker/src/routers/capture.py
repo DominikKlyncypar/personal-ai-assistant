@@ -114,7 +114,9 @@ def list_devices():
             inputs_raw.append(item)
         if item["max_output_channels"] > 0:
             item_out = dict(item)
-            is_loopback = platform_name == "Windows" and "loopback" in item_out["name"].lower()
+            is_wasapi = platform_name == "Windows" and item_out["hostapi"].lower() == "windows wasapi"
+            name_lower = item_out["name"].lower()
+            is_loopback = platform_name == "Windows" and ("loopback" in name_lower or is_wasapi)
             item_out["loopback_capable"] = is_loopback
             item_out["is_loopback"] = is_loopback
             outputs_raw.append(item_out)
