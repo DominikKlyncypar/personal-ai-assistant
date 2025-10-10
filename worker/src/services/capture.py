@@ -252,13 +252,16 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
             playback_id = None
 
         # On macOS/Linux, require a real input device; loopback is Windows-only
+        started_capture = False
         if platform.system() != "Windows":
             if mic_id is None:
                 raise RuntimeError("Select a microphone input. Playback loopback is Windows-only.")
             cap.start_mic(int(mic_id), samplerate)
+            started_capture = True
         else:
             # Windows: prefer loopback playback when available; fall back to mic
             if playback_id is not None:
+                loop_err: Exception | None = None
                 try:
                     import sounddevice as sd  # lazy import
 
@@ -284,27 +287,32 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                         name,
                         api_name,
                     )
-                    name_lower = name.lower() if isinstance(name, str) else ""
-                    api_lower = api_name.lower() if isinstance(api_name, str) else ""
-                    is_loopback = "loopback" in name_lower
-                    if not is_loopback and "wasapi" in api_lower:
-                        is_loopback = True
                 except Exception:
-                    is_loopback = False
+                    pass
 
-                if not is_loopback:
-                    if mic_id is not None:
-                        cap.start_mic(int(mic_id), samplerate)
-                    else:
-                        raise RuntimeError(
-                            "Selected playback device is not a loopback endpoint. Choose the entry marked '(loopback)' or select a microphone."
-                        )
-                else:
+                try:
                     cap.start_playback_loopback(int(playback_id), samplerate)
-            elif mic_id is not None:
-                cap.start_mic(int(mic_id), samplerate)
-            else:
-                raise RuntimeError("Select a loopback playback device or microphone before capturing.")
+                    started_capture = True
+                except Exception as exc:  # Capture the loopback failure
+                    loop_err = exc
+
+                if loop_err is not None:
+                    if mic_id is not None:
+                        self.logger.warning(
+                            "loopback start failed (%s), falling back to mic_id=%s",
+                            loop_err,
+                            mic_id,
+                        )
+                        cap.start_mic(int(mic_id), samplerate)
+                        started_capture = True
+                    else:
+                        raise RuntimeError(str(loop_err))
+            if not started_capture:
+                if mic_id is not None:
+                    cap.start_mic(int(mic_id), samplerate)
+                    started_capture = True
+                else:
+                    raise RuntimeError("Select a loopback playback device or microphone before capturing.")
         with state.capture.lock:
             state.capture.running = True
             state.capture.last_error = None

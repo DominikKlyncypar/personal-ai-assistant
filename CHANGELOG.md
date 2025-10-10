@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.20] - 2025-10-12
+## [1.1.21] - 2025-10-12
 
 ### Changed
 - Added an explicit “None (no microphone)” option so input capture can be disabled without reloading the app.
