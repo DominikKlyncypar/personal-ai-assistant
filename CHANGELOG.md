@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.23] - 2025-10-12
+
+### Fixed
+- Replaced remaining `self.logger` references in `start_capture` with the capture instance logger to avoid `NameError`.
+- Sanitised dump filenames by lowering `(label or "snapshot")` so `None` no longer triggers `'NoneType' object has no attribute "lower"'`.
+
+### Changed
+- Continue logging loopback candidates for troubleshooting and fall back to microphone only when loopback fails and a mic is selected.
+
 ## [1.1.22] - 2025-10-12
 # (update entries below)
 

@@ -281,7 +281,7 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                             name = str(dev_info.get("name") or "")
                         except Exception:
                             name = ""
-                    self.logger.info(
+                    cap.logger.info(
                         "loopback candidate id=%s name=%r api=%r",
                         dev_idx,
                         name,
@@ -298,7 +298,7 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
 
                 if loop_err is not None:
                     if mic_id is not None:
-                        self.logger.warning(
+                        cap.logger.warning(
                             "loopback start failed (%s), falling back to mic_id=%s",
                             loop_err,
                             mic_id,
