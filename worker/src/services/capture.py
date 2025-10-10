@@ -281,18 +281,30 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                 cap.start_mic(int(mic_id), samplerate)
             else:
                 raise RuntimeError("Select a loopback playback device or microphone before capturing.")
+        with state.capture.lock:
+            state.capture.running = True
+            state.capture.last_error = None
+            state.capture.last_error_ts = None
         return {"ok": True, "message": "started", "running": True}
     except Exception as e:  # noqa: BLE001
+        with state.capture.lock:
+            state.capture.last_error = str(e)
+            state.capture.last_error_ts = time.monotonic()
+            state.capture.running = False
         try:
             cap.stop()
-        finally:
-            state.capture.running = False
+        except Exception:
+            pass
         return {"ok": False, "message": str(e), "running": False}
 
 
 def stop_capture(state: State) -> Dict[str, Any]:
     cap = Capture(state)
-    cap.stop()
+    try:
+        cap.stop()
+    finally:
+        with state.capture.lock:
+            state.capture.running = False
     state.vad.speech_active = False
     state.vad.speech_frames = 0
     state.vad.silence_frames = 0
@@ -319,12 +331,20 @@ def capture_debug(state: State) -> Dict[str, Any]:
         buf_len = len(state.capture.buffer)
         frames_total = int(state.capture.frames_total)
         last_ts = state.capture.last_frame_ts
+        last_err = state.capture.last_error
+        last_err_ts = state.capture.last_error_ts
     age_ms = None
     if last_ts is not None:
         try:
             age_ms = int((time.monotonic() - last_ts) * 1000)
         except Exception:
             age_ms = None
+    err_age_ms = None
+    if last_err_ts is not None:
+        try:
+            err_age_ms = int((time.monotonic() - last_err_ts) * 1000)
+        except Exception:
+            err_age_ms = None
     return {
         "running": bool(state.capture.running),
         "samplerate": int(sr),
@@ -332,6 +352,8 @@ def capture_debug(state: State) -> Dict[str, Any]:
         "buffer_blocks": int(buf_len),
         "frames_total": frames_total,
         "ms_since_last_frame": age_ms,
+        "last_error": last_err,
+        "last_error_age_ms": err_age_ms,
     }
 
 

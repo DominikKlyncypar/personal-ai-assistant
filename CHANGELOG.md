@@ -2,16 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.11] - 2025-10-09
+## [1.1.12] - 2025-10-10
 
 ### Fixed
-- Updated mic and WASAPI loopback callbacks to update frame counters and timestamps, preventing false "frozen" detection and worker exits.
-- Improved loopback logging to flag callback status warnings and surface failures for troubleshooting.
+- Ensure `start_capture` records last errors for debugging and clears them on successful startups.
+- Update capture callbacks to increment frame counters and timestamps reliably.
 
 ### Changed
-- Treat all Windows WASAPI outputs as loopback-capable so the correct playback option is selected automatically.
+- Treat all Windows WASAPI outputs as loopback-capable so loopback devices are auto-selected.
 
-## [1.1.10] - 2025-10-08
+## [1.1.11] - 2025-10-09
 
 ### Added
 - Automatically migrate any bundled `assistant.db` into the user data directory so meetings survive reinstalls.

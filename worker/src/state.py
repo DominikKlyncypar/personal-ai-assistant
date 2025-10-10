@@ -20,6 +20,8 @@ class CaptureState:
     lock: threading.Lock = field(default_factory=threading.Lock)
     frames_total: int = 0
     last_frame_ts: Optional[float] = None
+    last_error: Optional[str] = None
+    last_error_ts: Optional[float] = None
 
 
 @dataclass
