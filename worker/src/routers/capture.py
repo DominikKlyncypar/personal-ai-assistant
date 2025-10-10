@@ -141,6 +141,20 @@ def list_devices():
     inputs = _dedupe(_filter_by_preferred(inputs_raw))
     outputs = _dedupe(_filter_by_preferred(outputs_raw))
 
+    if platform_name == "Windows":
+        outputs = [d for d in outputs if d.get("is_loopback")]
+
+    if platform_name == "Windows":
+        outputs.sort(key=lambda d: (0 if d.get("is_loopback") else 1, d["name"].lower()))
+    else:
+        outputs.sort(key=lambda d: d["name"].lower())
+    inputs.sort(key=lambda d: d["name"].lower())
+
+    if platform_name == "Windows":
+        loopback_ids = [d["id"] for d in outputs if d.get("is_loopback")]
+        if loopback_ids:
+            default_output = loopback_ids[0]
+
     return {
         "inputs": inputs,
         "outputs": outputs,
