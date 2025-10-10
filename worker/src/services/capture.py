@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import wave
 from collections import deque
+import logging
 
 from ..state import State
 
@@ -16,6 +17,7 @@ class Capture:
         self.state = state
         self.stream: Any | None = None
         self.reader_thread: Any | None = None
+        self.logger = logging.getLogger("app.capture")
 
     def _resize_buffer(self):
         s = self.state.capture
@@ -130,30 +132,41 @@ class Capture:
             max_channels = int(info.get("max_output_channels") or 2)
             if max_channels <= 0:
                 raise RuntimeError("Selected playback device exposes no channels for loopback capture.")
+            samplerate = int(info.get("default_samplerate") or samplerate or 48000)
         except Exception as e:
             raise RuntimeError(f"Loopback device not usable: {e}")
+
+        self.logger.info(
+            "start_playback_loopback device=%s hostapi=%s name=%s samplerate=%s channels=%s",
+            device_id,
+            info.get("hostapi"),
+            info.get("name"),
+            samplerate,
+            max_channels,
+        )
 
         s.samplerate = samplerate
         s.blocksize = max(256, int(samplerate * 0.02))
         self._resize_buffer()
-
-        samplerate = int(info.get("default_samplerate") or samplerate or 48000)
 
         try:
             wasapi = sd.WasapiSettings(loopback=True)
         except Exception as e:
             raise RuntimeError(f"WASAPI loopback not available: {e}")
 
-        dev_tuple = (None, device_id)
-
         def callback(indata, frames, time_info, status):
+            if status:
+                try:
+                    self.logger.warning("loopback callback status=%s", status)
+                except Exception:
+                    pass
             mono = np.mean(indata, axis=1, dtype=np.float32)
             with s.lock:
                 s.last_rms = float(np.sqrt(np.mean(np.square(mono)))) if mono.size else 0.0
                 s.buffer.append(np.array(mono, dtype=np.float32))
 
         self._start_stream(
-            device=dev_tuple,
+            device=device_id,
             channels=max(1, min(2, max_channels)),
             samplerate=samplerate,
             blocksize=s.blocksize,
