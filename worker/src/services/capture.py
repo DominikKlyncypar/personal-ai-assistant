@@ -94,10 +94,19 @@ class Capture:
         s.blocksize = max(128, int(samplerate * 0.01))
         self._resize_buffer()
 
+        extra_settings = None
+        if platform.system() == "Windows":
+            try:
+                import sounddevice as sd  # lazy import
+
+                extra_settings = sd.WasapiSettings(exclusive=False)
+            except Exception:
+                extra_settings = None
+
         def callback(indata, frames, time_info, status):
             if status:
                 try:
-                    self.logger.warning("mic callback status=%s", status)
+                    cap.logger.warning("mic callback status=%s", status)
                 except Exception:
                     pass
             mono = indata[:, 0] if indata.ndim == 2 else indata
@@ -119,6 +128,7 @@ class Capture:
             dtype="float32",
             latency='high',
             callback=callback,
+            extra_settings=extra_settings,
         )
 
     def start_playback_loopback(self, device_id: int | None, samplerate: int):
@@ -156,13 +166,11 @@ class Capture:
         self._resize_buffer()
 
         try:
-            wasapi = sd.WasapiSettings(loopback=True)
-        except TypeError:
+            wasapi = sd.WasapiSettings(exclusive=False)
             try:
-                wasapi = sd.WasapiSettings()
-                setattr(wasapi, "loopback", True)
-            except Exception as e:
-                raise RuntimeError(f"WASAPI loopback not available: {e}")
+                wasapi.loopback = True
+            except Exception:
+                pass
         except Exception as e:
             raise RuntimeError(f"WASAPI loopback not available: {e}")
 
@@ -275,6 +283,10 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                             api_name = str(hostapis[api_idx].get("name") or "")
                         except Exception:
                             api_name = ""
+                        try:
+                            sd.default.hostapi = api_idx
+                        except Exception:
+                            pass
                     name = ""
                     if isinstance(dev_info, dict):
                         try:
@@ -403,8 +415,8 @@ def dump_wav(state: State, seconds: int = 5, label: str | None = None) -> Dict[s
     if buf.shape[0] > take:
         buf = buf[-take:]
     out_dir = _ensure_tmp_dir(state)
-    lbl_input = (label or "snapshot").lower()
-    lbl = "".join(c if c.isalnum() or c in "-_" else "_" for c in lbl_input) or "snapshot"
+    lbl_input = label or "snapshot"
+    lbl = "".join(c if c.isalnum() or c in "-_" else "_" for c in lbl_input.lower()) or "snapshot"
     ts = time.strftime("%Y%m%d-%H%M%S")
     base = f"{lbl}_{ts}"
     out_path = out_dir / f"{base}.wav"

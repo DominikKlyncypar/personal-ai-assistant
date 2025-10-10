@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.24] - 2025-10-12
+
+### Fixed
+- Guarded loopback detection so `last_error` no longer reports `'NoneType' ... lower'` when no input device is selected.
+- Configured mic capture on Windows to request WASAPI shared mode, reducing WDM-KS driver errors.
+
+### Changed
+- Overlay caps logger on the capture instance so fallback warnings are always recorded.
+
 ## [1.1.23] - 2025-10-12
 
 ### Fixed
