@@ -6,6 +6,7 @@ import time
 import uuid
 from typing import Any, Dict
 
+import os
 from fastapi import FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -23,12 +24,32 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(data, ensure_ascii=False)
 
 
-def setup_logging(level: int = logging.INFO) -> None:
+def _resolve_level(default: int = logging.INFO) -> int:
+    env_level = os.getenv("WORKER_LOG_LEVEL")
+    if not env_level:
+        return default
+    env_level = env_level.strip()
+    if env_level.isdigit():
+        try:
+            return int(env_level)
+        except ValueError:
+            return default
+    lvl = logging.getLevelName(env_level.upper())
+    if isinstance(lvl, str):
+        return default
+    return int(lvl)
+
+
+def setup_logging(level: int | None = None) -> None:
+    resolved_level = level if level is not None else _resolve_level()
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
     root.handlers = [handler]
-    root.setLevel(level)
+    root.setLevel(resolved_level)
+    logging.getLogger("app").setLevel(resolved_level)
+    logging.getLogger("app.capture").setLevel(resolved_level)
+    logging.getLogger("app.access").setLevel(resolved_level)
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
