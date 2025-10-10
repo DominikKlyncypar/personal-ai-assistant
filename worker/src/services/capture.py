@@ -214,11 +214,13 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                 raise RuntimeError("Select a microphone input. Playback loopback is Windows-only.")
             cap.start_mic(int(mic_id), samplerate)
         else:
-            # Windows: prefer mic if provided, else loopback via WASAPI
-            if mic_id is not None:
+            # Windows: prefer loopback playback when available; fall back to mic
+            if playback_id is not None:
+                cap.start_playback_loopback(int(playback_id), samplerate)
+            elif mic_id is not None:
                 cap.start_mic(int(mic_id), samplerate)
             else:
-                cap.start_playback_loopback(int(playback_id) if playback_id is not None else None, samplerate)
+                raise RuntimeError("Select a loopback playback device or microphone before capturing.")
         return {"ok": True, "message": "started", "running": True}
     except Exception as e:  # noqa: BLE001
         try:
