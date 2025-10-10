@@ -136,13 +136,15 @@ class Capture:
         except Exception as e:
             raise RuntimeError(f"Loopback device not usable: {e}")
 
+        channels = max(1, min(2, max_channels))
+
         self.logger.info(
             "start_playback_loopback device=%s hostapi=%s name=%s samplerate=%s channels=%s",
             device_id,
             info.get("hostapi"),
             info.get("name"),
             samplerate,
-            max_channels,
+            channels,
         )
 
         s.samplerate = samplerate
@@ -166,8 +168,8 @@ class Capture:
                 s.buffer.append(np.array(mono, dtype=np.float32))
 
         self._start_stream(
-            device=device_id,
-            channels=max(1, min(2, max_channels)),
+            device=(None, device_id),
+            channels=channels,
             samplerate=samplerate,
             blocksize=s.blocksize,
             dtype="float32",
