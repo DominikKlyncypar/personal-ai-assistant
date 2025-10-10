@@ -278,15 +278,10 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                             name = str(dev_info.get("name") or "")
                         except Exception:
                             name = ""
-                    try:
-                        is_loopback = "loopback" in name.lower()
-                    except Exception:
-                        is_loopback = False
-                    try:
-                        api_is_wasapi = "wasapi" in api_name.lower()
-                    except Exception:
-                        api_is_wasapi = False
-                    if not is_loopback and api_is_wasapi:
+                    name_lower = name.lower() if isinstance(name, str) else ""
+                    api_lower = api_name.lower() if isinstance(api_name, str) else ""
+                    is_loopback = "loopback" in name_lower
+                    if not is_loopback and "wasapi" in api_lower:
                         is_loopback = True
                 except Exception:
                     is_loopback = False
