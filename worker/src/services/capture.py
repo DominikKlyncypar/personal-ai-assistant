@@ -157,6 +157,12 @@ class Capture:
 
         try:
             wasapi = sd.WasapiSettings(loopback=True)
+        except TypeError:
+            try:
+                wasapi = sd.WasapiSettings()
+                setattr(wasapi, "loopback", True)
+            except Exception as e:
+                raise RuntimeError(f"WASAPI loopback not available: {e}")
         except Exception as e:
             raise RuntimeError(f"WASAPI loopback not available: {e}")
 
