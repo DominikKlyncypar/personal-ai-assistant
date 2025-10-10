@@ -121,11 +121,28 @@ class Capture:
         if platform.system() != "Windows":
             raise RuntimeError("Loopback capture requires Windows (WASAPI).")
         s = self.state.capture
+        import sounddevice as sd  # lazy import
+        dev_idx = device_id if (device_id is not None and device_id >= 0) else None
+
+        try:
+            info = sd.query_devices(dev_idx, "input")
+            max_in = int(info.get("max_input_channels", 0))
+            if max_in <= 0:
+                raise RuntimeError("Selected playback device has no loopback channels")
+            try:
+                sd.check_input_settings(device=dev_idx, channels=max_in, samplerate=samplerate, dtype="float32")
+            except Exception:
+                sr_default = int(info.get("default_samplerate") or samplerate or 48000)
+                sd.check_input_settings(device=dev_idx, channels=max_in, samplerate=sr_default, dtype="float32")
+                samplerate = sr_default
+        except Exception as e:
+            raise RuntimeError(f"Loopback device not usable: {e}")
+
         s.samplerate = samplerate
         s.blocksize = max(256, int(samplerate * 0.02))
         self._resize_buffer()
+
         try:
-            import sounddevice as sd  # lazy import
             wasapi = sd.WasapiSettings(loopback=True)
         except Exception as e:
             raise RuntimeError(f"WASAPI loopback not available: {e}")
@@ -137,8 +154,8 @@ class Capture:
                 s.buffer.append(np.array(mono, dtype=np.float32))
 
         self._start_stream(
-            device=device_id if device_id is not None else None,
-            channels=2,
+            device=dev_idx,
+            channels=max(1, int(info.get("max_input_channels", 1))),
             samplerate=samplerate,
             blocksize=s.blocksize,
             dtype="float32",
