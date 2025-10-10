@@ -403,7 +403,8 @@ def dump_wav(state: State, seconds: int = 5, label: str | None = None) -> Dict[s
     if buf.shape[0] > take:
         buf = buf[-take:]
     out_dir = _ensure_tmp_dir(state)
-    lbl = "snapshot" if not label else "".join(c if c.isalnum() or c in "-_" else "_" for c in label.lower()) or "snapshot"
+    lbl_input = (label or "snapshot").lower()
+    lbl = "".join(c if c.isalnum() or c in "-_" else "_" for c in lbl_input) or "snapshot"
     ts = time.strftime("%Y%m%d-%H%M%S")
     base = f"{lbl}_{ts}"
     out_path = out_dir / f"{base}.wav"
