@@ -137,7 +137,7 @@ def create_app() -> FastAPI:
     settings = load_settings()
     setup_logging()
 
-    app = FastAPI(title="Personal AI Assistant Worker", version="1.1.19")
+    app = FastAPI(title="Personal AI Assistant Worker", version="1.1.20")
 
     # Attach config/state
     app.state.settings = settings

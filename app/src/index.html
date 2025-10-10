@@ -1107,10 +1107,10 @@
         pbNone.textContent = 'None (no loopback)';
         playbackSelect.appendChild(pbNone);
 
-        const micPlaceholder = document.createElement('option');
-        micPlaceholder.value = '';
-        micPlaceholder.textContent = 'Select input…';
-        micSelect.appendChild(micPlaceholder);
+        const micNone = document.createElement('option');
+        micNone.value = '';
+        micNone.textContent = 'None (no microphone)';
+        micSelect.appendChild(micNone);
 
         const simpleLabels = (data.os === "Windows_NT" || data.os === "Windows");
 

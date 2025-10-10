@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.20] - 2025-10-12
+
+### Changed
+- Added an explicit “None (no microphone)” option so input capture can be disabled without reloading the app.
+- Continue surfacing host API labels alongside device names to make loopback selection clearer.
+
+### Fixed
+- Ensure `start_capture` records last errors for debugging and clears them on successful startups.
+- Update capture callbacks to increment frame counters and timestamps reliably.
+
 ## [1.1.19] - 2025-10-12
 
 ### Changed

@@ -124,10 +124,15 @@ def list_devices():
     def _filter_by_preferred(devices):
         if platform_name != "Windows":
             return devices
-        preferred = {"Windows WASAPI"}
-        if any(d["hostapi"] in preferred for d in devices):
-            return [d for d in devices if d["hostapi"] in preferred]
-        return devices
+        wasapi = []
+        fallback = []
+        for d in devices:
+            host = str(d.get("hostapi") or "")
+            if "wasapi" in host.lower():
+                wasapi.append(d)
+            else:
+                fallback.append(d)
+        return wasapi if wasapi else fallback
 
     def _dedupe(devices):
         seen = set()
