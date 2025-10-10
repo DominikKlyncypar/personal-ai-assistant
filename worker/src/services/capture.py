@@ -95,6 +95,11 @@ class Capture:
         self._resize_buffer()
 
         def callback(indata, frames, time_info, status):
+            if status:
+                try:
+                    self.logger.warning("mic callback status=%s", status)
+                except Exception:
+                    pass
             mono = indata[:, 0] if indata.ndim == 2 else indata
             mono = mono.astype(np.float32, copy=False)
             with s.lock:
@@ -102,8 +107,7 @@ class Capture:
                 s.buffer.append(np.array(mono, dtype=np.float32))
                 s.frames_total += 1
                 try:
-                    import time as _t
-                    s.last_frame_ts = _t.monotonic()
+                    s.last_frame_ts = time.monotonic()
                 except Exception:
                     s.last_frame_ts = None
 
@@ -157,15 +161,17 @@ class Capture:
             raise RuntimeError(f"WASAPI loopback not available: {e}")
 
         def callback(indata, frames, time_info, status):
-            if status:
-                try:
+            try:
+                if status:
                     self.logger.warning("loopback callback status=%s", status)
-                except Exception:
-                    pass
-            mono = np.mean(indata, axis=1, dtype=np.float32)
-            with s.lock:
-                s.last_rms = float(np.sqrt(np.mean(np.square(mono)))) if mono.size else 0.0
-                s.buffer.append(np.array(mono, dtype=np.float32))
+                mono = indata.mean(axis=1).astype(np.float32, copy=False) if indata.ndim == 2 else indata.astype(np.float32, copy=False)
+                with s.lock:
+                    s.last_rms = float(np.sqrt(np.mean(np.square(mono)))) if mono.size else 0.0
+                    s.buffer.append(np.array(mono, dtype=np.float32))
+                    s.frames_total += 1
+                    s.last_frame_ts = time.monotonic()
+            except Exception:
+                self.logger.exception("loopback callback error")
 
         self._start_stream(
             device=(None, device_id),
@@ -258,10 +264,7 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                     name = str(dev_info.get("name") or "")
                     is_loopback = "loopback" in name.lower()
                     if not is_loopback and "wasapi" in api_name.lower():
-                        # Some WASAPI loopback devices omit the keyword; detect by channel layout
-                        max_in = int(dev_info.get("max_input_channels", 0))
-                        max_out = int(dev_info.get("max_output_channels", 0))
-                        is_loopback = max_in >= 1 and max_out == 0
+                        is_loopback = True
                 except Exception:
                     is_loopback = False
 
