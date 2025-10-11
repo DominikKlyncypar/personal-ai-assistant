@@ -28,4 +28,4 @@ Phase 0 complete:
 
 ## Releases
 
-- Latest: [1.1.25](CHANGELOG.md#1125---2025-10-12) — capitalized/deduped meeting summaries, meeting name status badge, and resilient auto-transcribe fail-stop overlap.
+- Latest: [1.1.25](CHANGELOG.md#1125---2025-10-12) — mix loopback audio with your mic on Windows and surface Stereo Mix–style devices directly in the playback picker.

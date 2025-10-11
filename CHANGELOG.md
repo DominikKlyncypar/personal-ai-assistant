@@ -4,12 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [1.1.25] - 2025-10-12
 
+### Added
+- Mix multiple Windows capture sources simultaneously so loopback audio and microphone speech reach the worker together.
+
 ### Fixed
 - Guarded loopback detection so `last_error` no longer reports `'NoneType' ... lower'` when no input device is selected.
+- Fall back to Stereo Mix–style loopback inputs when WASAPI loopback streams report PaError -9984.
 - Configured mic capture on Windows to request WASAPI shared mode, reducing WDM-KS driver errors.
 
 ### Changed
 - Overlay caps logger on the capture instance so fallback warnings are always recorded.
+- Promote Stereo Mix/Wave Out loopback devices into the playback dropdown to match user expectations.
 
 ## [1.1.23] - 2025-10-12
 
