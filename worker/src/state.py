@@ -22,6 +22,7 @@ class CaptureState:
     last_frame_ts: Optional[float] = None
     last_error: Optional[str] = None
     last_error_ts: Optional[float] = None
+    controller: Any | None = None
 
 
 @dataclass

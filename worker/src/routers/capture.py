@@ -120,6 +120,14 @@ def list_devices():
             item_out["loopback_capable"] = is_loopback
             item_out["is_loopback"] = is_loopback
             outputs_raw.append(item_out)
+        elif platform_name == "Windows" and item["max_input_channels"] > 0:
+            name_lower = item["name"].lower()
+            if any(tag in name_lower for tag in ["stereo mix", "what u hear", "wave out mix", "mix (realtek", "loopback", "soundboard"]):
+                item_out = dict(item)
+                item_out["max_output_channels"] = item_out["max_input_channels"]
+                item_out["loopback_capable"] = True
+                item_out["is_loopback"] = True
+                outputs_raw.append(item_out)
 
     def _filter_by_preferred(devices):
         if platform_name != "Windows":

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.1.24] - 2025-10-12
+## [1.1.25] - 2025-10-12
 
 ### Fixed
 - Guarded loopback detection so `last_error` no longer reports `'NoneType' ... lower'` when no input device is selected.
