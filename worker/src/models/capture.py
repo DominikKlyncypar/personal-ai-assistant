@@ -9,7 +9,10 @@ class StartCaptureRequest(BaseModel):
         default=None,
         description="Input device id (number or string). Empty/None means loopback mode.",
     )
-    playback_id: Optional[int] = Field(default=None, description="Output device id for loopback (Windows)")
+    playback_id: Optional[Union[int, str]] = Field(
+        default=None,
+        description="Output device id for loopback (Windows). Use string 'sc:NAME' to select a WASAPI loopback speaker.",
+    )
     samplerate: int = Field(default=48000, ge=8000, le=192000)
 
 

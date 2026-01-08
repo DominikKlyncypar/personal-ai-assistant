@@ -116,18 +116,38 @@ def list_devices():
             item_out = dict(item)
             is_wasapi = platform_name == "Windows" and item_out["hostapi"].lower() == "windows wasapi"
             name_lower = item_out["name"].lower()
-            is_loopback = platform_name == "Windows" and ("loopback" in name_lower or is_wasapi)
-            item_out["loopback_capable"] = is_loopback
+            is_loopback = platform_name == "Windows" and ("loopback" in name_lower)
+            item_out["loopback_capable"] = is_wasapi
             item_out["is_loopback"] = is_loopback
             outputs_raw.append(item_out)
         elif platform_name == "Windows" and item["max_input_channels"] > 0:
             name_lower = item["name"].lower()
-            if any(tag in name_lower for tag in ["stereo mix", "what u hear", "wave out mix", "mix (realtek", "loopback", "soundboard"]):
+            if any(tag in name_lower for tag in ["stereo mix", "what u hear", "wave out mix", "mix (realtek", "soundboard"]):
                 item_out = dict(item)
                 item_out["max_output_channels"] = item_out["max_input_channels"]
                 item_out["loopback_capable"] = True
-                item_out["is_loopback"] = True
+                item_out["is_loopback"] = False
                 outputs_raw.append(item_out)
+
+    loopback_inputs = []
+    loopback_speakers = []
+    if platform_name == "Windows":
+        for d in inputs_raw:
+            name_lower = str(d.get("name") or "").lower()
+            if "(loopback)" in name_lower:
+                loopback_inputs.append(dict(d))
+        try:
+            import soundcard as sc  # type: ignore
+            seen = set()
+            for sp in sc.all_speakers():
+                sp_name = str(getattr(sp, "name", None) or sp)
+                key = sp_name.strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                loopback_speakers.append({"id": f"sc:{sp_name}", "name": sp_name})
+        except Exception:
+            pass
 
     def _filter_by_preferred(devices):
         if platform_name != "Windows":
@@ -170,6 +190,8 @@ def list_devices():
     return {
         "inputs": inputs,
         "outputs": outputs,
+        "loopback_inputs": loopback_inputs,
+        "loopback_speakers": loopback_speakers,
         "hostapis": [h["name"] for h in hostapis],
         "defaults": {"input": default_input, "output": default_output},
         "os": platform_name,

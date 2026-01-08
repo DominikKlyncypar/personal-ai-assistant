@@ -365,7 +365,7 @@
         <h2>Audio Devices</h2>
         <div class="row">
           <label class="stack" style="min-width:260px">
-            <span class="muted">Playback (Speakers for loopback on Windows)</span>
+            <span class="muted">System Audio (WASAPI loopback)</span>
             <select id="playbackSelect"></select>
           </label>
           <label class="stack" style="min-width:260px">
@@ -381,8 +381,8 @@
               Refresh
             </button>
           </div>
-          <span id="deviceHelp" class="help">—</span>
         </div>
+        <div id="deviceHelp" class="help">Loading devices...</div>
       </section>
 
       <!-- =================================================================== -->
@@ -1113,6 +1113,8 @@
         micSelect.appendChild(micNone);
 
         const simpleLabels = (data.os === "Windows_NT" || data.os === "Windows");
+        const outputIds = new Set();
+        const outputOptions = [];
 
         for (const d of data.outputs) {
           const opt = document.createElement("option");
@@ -1125,11 +1127,58 @@
           if (!simpleLabels && !host && d.hostapi) {
             label += ` [${d.hostapi}]`;
           }
-          if (d.is_loopback && !label.toLowerCase().includes("loopback")) {
-            label += " (loopback)";
+          if (d.is_loopback) {
+            if (!label.toLowerCase().includes("loopback")) {
+              label += " (loopback)";
+            }
+            opt.dataset.loopback = "1";
           }
           opt.textContent = label;
-          playbackSelect.appendChild(opt);
+          outputIds.add(opt.value);
+          outputOptions.push(opt);
+        }
+        const loopbackInputs = Array.isArray(data.loopback_inputs) ? data.loopback_inputs : [];
+        const loopbackSpeakers = Array.isArray(data.loopback_speakers) ? data.loopback_speakers : [];
+        if (loopbackInputs.length || loopbackSpeakers.length) {
+          const grp = document.createElement("optgroup");
+          grp.label = "System Audio (WASAPI Loopback)";
+          for (const d of loopbackInputs) {
+            const idStr = String(d.id);
+            if (outputIds.has(idStr)) continue;
+            const opt = document.createElement("option");
+            opt.value = idStr;
+            opt.dataset.loopback = "1";
+            let label = d.name || `Device ${d.id}`;
+            if (!label.toLowerCase().includes("loopback")) {
+              label += " (loopback input)";
+            }
+            opt.textContent = label;
+            grp.appendChild(opt);
+          }
+          for (const d of loopbackSpeakers) {
+            const idStr = String(d.id);
+            if (outputIds.has(idStr)) continue;
+            const opt = document.createElement("option");
+            opt.value = idStr;
+            opt.dataset.loopback = "1";
+            let label = d.name || `Device ${d.id}`;
+            if (!label.toLowerCase().includes("loopback")) {
+              label += " (loopback)";
+            }
+            opt.textContent = label;
+            grp.appendChild(opt);
+          }
+          if (grp.children.length) {
+            playbackSelect.appendChild(grp);
+          }
+        }
+        if (outputOptions.length) {
+          const grp = document.createElement("optgroup");
+          grp.label = "Playback Outputs";
+          for (const opt of outputOptions) {
+            grp.appendChild(opt);
+          }
+          playbackSelect.appendChild(grp);
         }
         for (const d of data.inputs) {
           const opt = document.createElement("option");
@@ -1152,20 +1201,25 @@
         };
         const hasOutputDefault = applyDefault(playbackSelect, defaults.output);
         const hasInputDefault = applyDefault(micSelect, defaults.input);
-        if (!hasOutputDefault && playbackSelect.options.length > 1) {
-          playbackSelect.selectedIndex = 1;
+        if (!hasOutputDefault) {
+          const loopOpt = playbackSelect.querySelector('option[data-loopback="1"]');
+          if (loopOpt) {
+            playbackSelect.value = loopOpt.value;
+          } else if (playbackSelect.options.length > 1) {
+            playbackSelect.selectedIndex = 1;
+          }
         }
         if (!hasInputDefault && micSelect.options.length > 1) {
           micSelect.selectedIndex = 1;
         }
 
         deviceHelp.textContent = (data.os === "Windows_NT" || data.os === "Windows")
-          ? "Tip: choose your Speakers (WASAPI) for loopback capture. Mic is optional."
+          ? "Tip: pick a System Audio (WASAPI Loopback) item to capture system audio. Mic is optional."
           : "On macOS, loopback requires a virtual device. Mic works for development.";
       }
 
       async function loadDevicesWithRetry({ tries = 5, delayMs = 500 } = {}) {
-        deviceHelp.textContent = "Loading devices…";
+        deviceHelp.textContent = "Loading devices...";
         for (let i = 0; i < tries; i++) {
           try { await loadDevicesOnce(); return; }
           catch (e) {
@@ -1458,9 +1512,17 @@
             try { await fetch(`http://127.0.0.1:8000/v1/meeting/start/${activeMeetingId}`, { method:'POST' }); } catch {}
             serverMeetingId = activeMeetingId; updateMeetingStatusUI();
           }
+          const playbackVal = playbackSelect.value;
+          const micVal = micSelect.value;
+          const playbackId = (playbackVal === '')
+            ? null
+            : (Number.isFinite(Number(playbackVal)) ? Number(playbackVal) : playbackVal);
+          const micId = (micVal === '')
+            ? null
+            : (Number.isFinite(Number(micVal)) ? Number(micVal) : micVal);
           const body={
-            playback_id: (playbackSelect.value === '' ? null : Number(playbackSelect.value)),
-            mic_id: (micSelect.value === '' ? null : Number(micSelect.value)),
+            playback_id: playbackId,
+            mic_id: micId,
             samplerate:48000
           };
           const r=await fetch("http://127.0.0.1:8000/v1/start_capture",{

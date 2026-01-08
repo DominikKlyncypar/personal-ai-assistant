@@ -95,15 +95,38 @@ def create_app() -> FastAPI:
             _tqdm_auto.tqdm.external_write_mode = staticmethod(lambda *a, **k: _nullctx())  # type: ignore[attr-defined]
         except Exception:
             pass
-        # Ensure the disabled tqdm instance uses a context manager lock
-        _disabled = getattr(_tqdm_std, "disabled_tqdm", None)
-        if _disabled is not None:
+        def _patch_disabled_tqdm(obj):
+            if obj is None:
+                return
             try:
-                setattr(_disabled, "_lock", _nullctx())
-                setattr(_disabled, "disable", True)
-                setattr(_disabled, "get_lock", staticmethod(lambda: _nullctx()))
+                setattr(obj, "_lock", _nullctx())
             except Exception:
                 pass
+            try:
+                setattr(obj, "disable", True)
+            except Exception:
+                pass
+            try:
+                if isinstance(obj, type):
+                    setattr(obj, "get_lock", staticmethod(lambda: _nullctx()))
+                else:
+                    setattr(obj, "get_lock", (lambda: _nullctx()))
+            except Exception:
+                pass
+
+        # Ensure disabled tqdm objects have a usable lock across modules
+        _patch_disabled_tqdm(getattr(_tqdm_std, "disabled_tqdm", None))
+        _patch_disabled_tqdm(getattr(_tqdm, "disabled_tqdm", None))
+        try:
+            from tqdm import auto as _tqdm_auto  # type: ignore
+            _patch_disabled_tqdm(getattr(_tqdm_auto, "disabled_tqdm", None))
+        except Exception:
+            pass
+        try:
+            import tqdm.utils as _tqdm_utils  # type: ignore
+            _patch_disabled_tqdm(getattr(_tqdm_utils, "disabled_tqdm", None))
+        except Exception:
+            pass
 
         # Absolute fallback: ensure any tqdm instance has a usable lock
         try:

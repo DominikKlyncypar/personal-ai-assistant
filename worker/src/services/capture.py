@@ -269,7 +269,7 @@ class Capture:
 
 
     # -------- Windows WASAPI loopback with capability-based detection, sibling search & WASAPI default --------
-    def start_playback_loopback(self, device_id: int | None, samplerate: int):
+    def start_playback_loopback(self, device_id: int | str | None, samplerate: int):
         """
         Windows WASAPI loopback with robust detection:
         1) If device looks like a dedicated loopback INPUT (max_in>0 and max_out==0 or name has "(loopback)"),
@@ -290,20 +290,190 @@ class Capture:
         import sounddevice as sd
         import threading as _th
 
+        try:
+            hostapis = sd.query_hostapis()
+            wasapi_idx = None
+            for i, ha in enumerate(hostapis):
+                if "wasapi" in str(ha.get("name") or "").lower():
+                    wasapi_idx = i
+                    break
+            if wasapi_idx is not None:
+                sd.default.hostapi = wasapi_idx
+        except Exception:
+            pass
 
-        if device_id is None or int(device_id) < 0:
+
+        if device_id is None or (isinstance(device_id, int) and device_id < 0):
             raise RuntimeError("Select a loopback playback device (OUTPUT) before starting.")
 
 
-        dev_id = int(device_id)
+        speaker_name = None
+        dev_id: int | None = None
+        if isinstance(device_id, str):
+            if device_id.startswith("sc:"):
+                speaker_name = device_id[3:].strip()
+            else:
+                try:
+                    dev_id = int(device_id)
+                except Exception:
+                    raise RuntimeError(f"Invalid playback device id: {device_id}")
+        else:
+            dev_id = int(device_id)
         multi_source = bool(self.streams)
         effective_samplerate = samplerate
         if multi_source and s.samplerate:
             effective_samplerate = int(s.samplerate)
         samplerate = effective_samplerate
-        self._register_source("loopback")
         success = False
+        # Prefer native WASAPI loopback via soundcard when available (Audacity-like)
+        try:
+            import soundcard as sc  # type: ignore
+        except Exception:
+            sc = None
+        if sc is None and speaker_name:
+            raise RuntimeError("soundcard not installed; cannot use sc: playback id")
+        if sc is not None:
+            try:
+                try:
+                    import pythoncom  # type: ignore
+                    pythoncom.CoInitialize()
+                except Exception:
+                    pass
+                # Resolve speaker by name (sounddevice -> soundcard)
+                try:
+                    if dev_id is not None:
+                        dev_any = sd.query_devices(dev_id)
+                        dev_name = str(dev_any.get("name") or "")
+                        max_out_sc = int(dev_any.get("max_output_channels") or 0)
+                    else:
+                        dev_name = speaker_name or ""
+                        max_out_sc = 0
+                except Exception:
+                    dev_name = ""
+                    max_out_sc = 0
 
+                base_norm = _norm_name(dev_name)
+                def _paren_token(val: str) -> str:
+                    if not val:
+                        return ""
+                    left = val.rfind("(")
+                    right = val.rfind(")")
+                    if 0 <= left < right:
+                        return _norm_name(val[left + 1:right])
+                    return ""
+
+                base_tokens = set(base_norm.split())
+                base_paren = _paren_token(dev_name)
+                speaker = None
+                best_score = -1
+                best_name = ""
+                speakers = sc.all_speakers()
+                for sp in speakers:
+                    sp_name = getattr(sp, "name", None) or str(sp)
+                    sp_norm = _norm_name(str(sp_name))
+                    if speaker_name:
+                        if _norm_name(speaker_name) != sp_norm:
+                            continue
+                        speaker = sp
+                        best_name = str(sp_name)
+                        best_score = 999
+                        break
+                    sp_tokens = set(sp_norm.split())
+                    score = len(base_tokens & sp_tokens)
+                    sp_paren = _paren_token(str(sp_name))
+                    if base_paren and sp_paren and (base_paren in sp_paren or sp_paren in base_paren):
+                        score += 5
+                    if score > best_score:
+                        best_score = score
+                        speaker = sp
+                        best_name = str(sp_name)
+                if speaker_name and speaker is None:
+                    names = [str(getattr(sp, "name", None) or sp) for sp in speakers]
+                    raise RuntimeError(f"soundcard speaker not found: {speaker_name}. available={names}")
+                if speaker is None or best_score <= 0:
+                    speaker = sc.default_speaker()
+                    best_name = str(getattr(speaker, "name", None) or speaker)
+
+                mic = None
+                mic_name = None
+                try:
+                    mic = sc.get_microphone(best_name, include_loopback=True)
+                    mic_name = str(getattr(mic, "name", None) or mic)
+                except Exception:
+                    mic = None
+                    mic_name = None
+                if mic is None:
+                    for m in sc.all_microphones(include_loopback=True):
+                        mname = str(getattr(m, "name", None) or m)
+                        if _norm_name(best_name) == _norm_name(mname):
+                            mic = m
+                            mic_name = mname
+                            break
+                if mic is None:
+                    raise RuntimeError(f"soundcard loopback mic not found for speaker: {best_name}")
+
+                if not multi_source:
+                    s.samplerate = int(effective_samplerate)
+                    s.blocksize = max(256, int(s.samplerate * 0.02))
+                    self._resize_buffer()
+                self._register_source("loopback")
+                self.streams["loopback"] = None
+                s.running = True
+                with s.lock:
+                    s.loopback_backend = "soundcard"
+                    s.loopback_device = mic_name or best_name
+
+                def _reader_sc():
+                    try:
+                        import pythoncom  # type: ignore
+                        pythoncom.CoInitialize()
+                    except Exception:
+                        pass
+                    frames = max(256, int(s.samplerate * 0.02))
+                    ch_candidates = []
+                    if max_out_sc > 0:
+                        ch_candidates.append(max_out_sc)
+                    ch_candidates += [2, 1]
+                    last_err = None
+                    for ch in ch_candidates:
+                        try:
+                            with mic.recorder(
+                                samplerate=int(s.samplerate),
+                                channels=int(ch),
+                                blocksize=None,
+                            ) as rec:
+                                while self.state.capture.running and "loopback" in self.streams:
+                                    data = rec.record(frames)
+                                    if data is None:
+                                        time.sleep(0.01)
+                                        continue
+                                    mono = data.mean(axis=1) if getattr(data, "ndim", 1) == 2 else data
+                                    self._emit_audio("loopback", mono.astype(np.float32, copy=False))
+                            return
+                        except Exception as e:
+                            last_err = e
+                            time.sleep(0.05)
+                    if last_err is not None:
+                        with s.lock:
+                            s.last_error = str(last_err)
+                            s.last_error_ts = time.monotonic()
+
+                thread = _th.Thread(target=_reader_sc, daemon=True)
+                self.reader_threads["loopback"] = thread
+                thread.start()
+                success = True
+                return
+            except Exception as e:
+                if speaker_name:
+                    raise RuntimeError(f"soundcard loopback failed for {speaker_name}: {e}")
+                try:
+                    self.logger.warning("soundcard loopback failed, falling back to PortAudio: %s", e)
+                except Exception:
+                    pass
+
+
+        if dev_id is None:
+            raise RuntimeError("soundcard loopback failed and PortAudio loopback requires a numeric playback id.")
 
         try:
             # --- probe device views ---
@@ -343,6 +513,52 @@ class Capture:
                 success = True
                 return
 
+            # Prefer explicit WASAPI loopback input devices (Audacity-style) when present
+            try:
+                total = len(sd.query_devices())
+                base_norm = _norm_name(name)
+                for idx in range(total):
+                    try:
+                        d = sd.query_devices(idx)
+                        if int(d.get("max_input_channels", 0)) <= 0:
+                            continue
+                        nm = str(d.get("name") or "")
+                        nm_low = nm.lower()
+                        if "(loopback)" not in nm_low:
+                            continue
+                        nm_norm = _norm_name(nm)
+                        if base_norm in nm_norm or nm_norm in base_norm:
+                            self.logger.info("loopback: using loopback input idx=%s name=%s", idx, nm)
+                            self.start_mic(idx, samplerate, source="loopback")
+                            success = True
+                            return
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+
+            def _to_mono_f32(arr):
+                data = np.asarray(arr)
+                if data.ndim == 2:
+                    mono = data.mean(axis=1)
+                else:
+                    mono = data
+                if mono.dtype == np.int16:
+                    return mono.astype(np.float32) / 32768.0
+                return mono.astype(np.float32, copy=False)
+
+
+            def _loopback_callback(indata, frames, time_info, status):
+                try:
+                    if status:
+                        self.logger.warning("loopback callback status=%s", status)
+                    self._emit_audio("loopback", _to_mono_f32(indata))
+                except Exception as e:
+                    with s.lock:
+                        s.last_error = str(e)
+                        s.last_error_ts = time.monotonic()
+
 
             def _try_open(dev_idx: int | None, ch_list, sr_list, extra_settings):
                 last_err = None
@@ -380,25 +596,70 @@ class Capture:
                 )
 
 
-                for ch in ch_candidates:
-                    for sr in sr_candidates:
-                        try:
-                            self.logger.info("loopback: trying dev=%s ch=%s sr=%s", dev_idx, ch, sr)
-                            stream = sd.InputStream(
-                                device=dev_idx,  # can be None for default
-                                channels=ch,
-                                samplerate=sr,
-                                blocksize=None,
-                                dtype="float32",
-                                latency="low",
-                                extra_settings=extra_settings,
-                            )
-                            stream.start()
-                            return (True, ch, sr, stream)
-                        except Exception as e:
-                            last_err = e
-                            self.logger.warning("loopback open failed (dev=%s ch=%s sr=%s): %s", dev_idx, ch, sr, e)
-                return (False, None, None, last_err)
+                dtype_candidates = ["float32", "int16"]
+                for dtype in dtype_candidates:
+                    for ch in ch_candidates:
+                        for sr in sr_candidates:
+                            try:
+                                self.logger.info(
+                                    "loopback: trying callback dev=%s ch=%s sr=%s dtype=%s",
+                                    dev_idx,
+                                    ch,
+                                    sr,
+                                    dtype,
+                                )
+                                stream = sd.InputStream(
+                                    device=dev_idx,
+                                    channels=ch,
+                                    samplerate=sr,
+                                    blocksize=None,
+                                    dtype=dtype,
+                                    latency="low",
+                                    extra_settings=extra_settings,
+                                    callback=_loopback_callback,
+                                )
+                                stream.start()
+                                return (True, ch, sr, stream, True)
+                            except Exception as e:
+                                last_err = e
+                                self.logger.warning(
+                                    "loopback callback open failed (dev=%s ch=%s sr=%s dtype=%s): %s",
+                                    dev_idx,
+                                    ch,
+                                    sr,
+                                    dtype,
+                                    e,
+                                )
+                            try:
+                                self.logger.info(
+                                    "loopback: trying blocking dev=%s ch=%s sr=%s dtype=%s",
+                                    dev_idx,
+                                    ch,
+                                    sr,
+                                    dtype,
+                                )
+                                stream = sd.InputStream(
+                                    device=dev_idx,  # can be None for default
+                                    channels=ch,
+                                    samplerate=sr,
+                                    blocksize=None,
+                                    dtype=dtype,
+                                    latency="low",
+                                    extra_settings=extra_settings,
+                                )
+                                stream.start()
+                                return (True, ch, sr, stream, False)
+                            except Exception as e:
+                                last_err = e
+                                self.logger.warning(
+                                    "loopback open failed (dev=%s ch=%s sr=%s dtype=%s): %s",
+                                    dev_idx,
+                                    ch,
+                                    sr,
+                                    dtype,
+                                    e,
+                                )
+                return (False, None, None, last_err, False)
 
 
             # Build default sample-rate base (includes both views + requested/effective)
@@ -426,13 +687,20 @@ class Capture:
             def _open_with_loopback_flag(target_dev: int | None):
                 try:
                     wasapi_lb = sd.WasapiSettings(loopback=True, exclusive=False)
-                except TypeError:
-                    wasapi_lb = sd.WasapiSettings()
-                    setattr(wasapi_lb, "loopback", True)
-                    setattr(wasapi_lb, "exclusive", False)
+                except Exception:
+                    try:
+                        wasapi_lb = sd.WasapiSettings()
+                        setattr(wasapi_lb, "loopback", True)
+                        setattr(wasapi_lb, "exclusive", False)
+                    except Exception as e:
+                        return (False, None, None, RuntimeError(f"WASAPI loopback not supported: {e}"), False)
+                ch_list = []
+                if isinstance(max_out, int) and max_out > 0:
+                    ch_list.append(max_out)
+                ch_list += [2, 1, 8, 6, 4, 3]
                 return _try_open(
                     target_dev,  # can be None for default
-                    ch_list=[2, 1, 8, 6, 4, 3],
+                    ch_list=ch_list,
                     sr_list=sr_base,
                     extra_settings=wasapi_lb,
                 )
@@ -442,23 +710,24 @@ class Capture:
             tried: List[str] = []
             ok = False
             ch = sr = res = None
+            used_cb = False
 
 
             if already_loopback_input:
                 tried.append("as_input:selected")
-                ok, ch, sr, res = _open_as_input(dev_id)
+                ok, ch, sr, res, used_cb = _open_as_input(dev_id)
                 if not ok:
                     tried.append("as_input:selected")
-                    ok, ch, sr, res = _open_as_input(dev_id)
+                    ok, ch, sr, res, used_cb = _open_as_input(dev_id)
                 if not ok:
                     tried.append("with_loopback_flag:selected")
-                    ok, ch, sr, res = _open_with_loopback_flag(dev_id)
+                    ok, ch, sr, res, used_cb = _open_with_loopback_flag(dev_id)
             else:
                 tried.append("with_loopback_flag:selected")
-                ok, ch, sr, res = _open_with_loopback_flag(dev_id)
+                ok, ch, sr, res, used_cb = _open_with_loopback_flag(dev_id)
                 if not ok:
                     tried.append("as_input:selected")
-                    ok, ch, sr, res = _open_as_input(dev_id)
+                    ok, ch, sr, res, used_cb = _open_as_input(dev_id)
 
 
             # Sibling search
@@ -486,13 +755,13 @@ class Capture:
 
                     for idx in sibling_indices:
                         tried.append(f"as_input:sibling:{idx}")
-                        ok, ch, sr, res = _open_as_input(idx)
+                        ok, ch, sr, res, used_cb = _open_as_input(idx)
                         if ok:
                             break
                     if not ok:
                         for idx in sibling_indices:
                             tried.append(f"with_loopback_flag:sibling:{idx}")
-                            ok, ch, sr, res = _open_with_loopback_flag(idx)
+                            ok, ch, sr, res, used_cb = _open_with_loopback_flag(idx)
                             if ok:
                                 break
                 except Exception:
@@ -513,14 +782,14 @@ class Capture:
                         def_out = hostapis[hostapi_idx].get("default_output_device", None) if 0 <= hostapi_idx < len(hostapis) else None
                     if isinstance(def_out, int) and def_out >= 0:
                         tried.append(f"with_loopback_flag:wasapi_default:{def_out}")
-                        ok, ch, sr, res = _open_with_loopback_flag(def_out)
+                        ok, ch, sr, res, used_cb = _open_with_loopback_flag(def_out)
                 except Exception:
                     pass
 
 
             if not ok:
                 tried.append("with_loopback_flag:default_output(None)")
-                ok, ch, sr, res = _open_with_loopback_flag(None)
+                ok, ch, sr, res, used_cb = _open_with_loopback_flag(None)
 
             if not ok:
                 fallback_inputs: List[int] = []
@@ -578,20 +847,44 @@ class Capture:
                 self._resize_buffer()
             self.streams["loopback"] = stream
             s.running = True
+            with s.lock:
+                s.loopback_backend = "portaudio"
+                s.loopback_device = name
+
+            if used_cb:
+                self.reader_threads["loopback"] = None
+                success = True
+                return
 
 
             def _reader():
                 frames = max(256, int(s.samplerate * 0.02))
+                error_count = 0
                 while self.state.capture.running and "loopback" in self.streams:
                     try:
                         data, _ = stream.read(frames)
-                        mono = data.mean(axis=1) if getattr(data, "ndim", 1) == 2 else data
-                        self._emit_audio("loopback", mono)
+                        self._emit_audio("loopback", _to_mono_f32(data))
+                        error_count = 0
                     except Exception as e:
+                        error_count += 1
                         with s.lock:
                             s.last_error = str(e)
                             s.last_error_ts = time.monotonic()
-                        time.sleep(0.02)
+                        if error_count >= 5:
+                            self.logger.warning("loopback read failed repeatedly; disabling loopback source")
+                            try:
+                                stream.stop()
+                            except Exception:
+                                pass
+                            try:
+                                stream.close()
+                            except Exception:
+                                pass
+                            self.streams.pop("loopback", None)
+                            self.reader_threads.pop("loopback", None)
+                            self._unregister_source("loopback")
+                            break
+                        time.sleep(0.05)
 
 
             thread = _th.Thread(target=_reader, daemon=True)
@@ -622,35 +915,44 @@ class Capture:
         if not s.running:
             return
         import threading as _th
+        streams = list(self.streams.items())
         try:
             s.running = False
-            for src, stream in list(self.streams.items()):
+            for _, stream in streams:
                 if stream is None:
                     continue
+                try:
+                    if hasattr(stream, "abort"):
+                        stream.abort()
+                except Exception:
+                    pass
                 try:
                     stream.stop()
                 except Exception:
                     pass
+            for thread in list(self.reader_threads.values()):
+                if isinstance(thread, _th.Thread):
+                    try:
+                        thread.join(timeout=0.5)
+                    except Exception:
+                        pass
+            for _, stream in streams:
+                if stream is None:
+                    continue
                 try:
                     stream.close()
                 except Exception:
                     pass
         finally:
-            try:
-                for thread in list(self.reader_threads.values()):
-                    if isinstance(thread, _th.Thread):
-                        try:
-                            thread.join(timeout=0.2)
-                        except Exception:
-                            pass
-            finally:
-                self.streams.clear()
-                self.reader_threads.clear()
-                with self._mix_lock:
-                    self._active_sources.clear()
-                    self._mix_pending.clear()
+            self.streams.clear()
+            self.reader_threads.clear()
+            with self._mix_lock:
+                self._active_sources.clear()
+                self._mix_pending.clear()
             with s.lock:
                 s.last_rms = 0.0
+                s.loopback_backend = None
+                s.loopback_device = None
 
 
 
@@ -686,10 +988,23 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     cap = Capture(state)
     try:
-        if isinstance(mic_id, str) and mic_id.strip() == "":
-            mic_id = None
-        if isinstance(playback_id, str) and playback_id.strip() == "":
-            playback_id = None
+        if isinstance(mic_id, str):
+            if mic_id.strip() == "":
+                mic_id = None
+            else:
+                try:
+                    mic_id = int(mic_id)
+                except Exception:
+                    raise RuntimeError(f"Invalid mic_id: {mic_id}")
+        if isinstance(playback_id, str):
+            if playback_id.strip() == "":
+                playback_id = None
+            else:
+                try:
+                    playback_id = int(playback_id)
+                except Exception:
+                    # Allow non-numeric IDs (e.g. soundcard loopback speaker ids)
+                    playback_id = playback_id.strip()
 
 
         if platform.system() != "Windows":
@@ -701,13 +1016,14 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
             mic_started = False
             loop_err: Exception | None = None
             mic_err: Exception | None = None
+            partial_error = False
 
             if playback_id is None and mic_id is None:
                 raise RuntimeError("Select a loopback playback device or microphone before capturing.")
 
             if playback_id is not None:
                 try:
-                    cap.start_playback_loopback(int(playback_id), samplerate)
+                    cap.start_playback_loopback(playback_id, samplerate)
                     playback_started = True
                     samplerate = state.capture.samplerate or samplerate
                 except Exception as exc:
@@ -726,16 +1042,25 @@ def start_capture(state: State, payload: Dict[str, Any]) -> Dict[str, Any]:
                 raise RuntimeError(str(err))
 
             if loop_err is not None and playback_id is not None and mic_started:
+                partial_error = True
+                with state.capture.lock:
+                    state.capture.last_error = f"loopback start failed: {loop_err}"
+                    state.capture.last_error_ts = time.monotonic()
                 cap.logger.warning("loopback start failed (%s); continuing with microphone only", loop_err)
             if mic_err is not None and mic_id is not None and playback_started:
+                partial_error = True
+                with state.capture.lock:
+                    state.capture.last_error = f"microphone start failed: {mic_err}"
+                    state.capture.last_error_ts = time.monotonic()
                 cap.logger.warning("microphone start failed (%s); continuing with loopback only", mic_err)
 
 
 
         with state.capture.lock:
             state.capture.running = True
-            state.capture.last_error = None
-            state.capture.last_error_ts = None
+            if not partial_error:
+                state.capture.last_error = None
+                state.capture.last_error_ts = None
             state.capture.controller = cap
         return {"ok": True, "message": "started", "running": True}
     except Exception as e:
@@ -817,6 +1142,8 @@ def capture_debug(state: State) -> Dict[str, Any]:
         "ms_since_last_frame": age_ms,
         "last_error": last_err,
         "last_error_age_ms": err_age_ms,
+        "loopback_backend": state.capture.loopback_backend,
+        "loopback_device": state.capture.loopback_device,
     }
 
 

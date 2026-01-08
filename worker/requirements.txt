@@ -5,8 +5,11 @@ pydantic-settings==2.6.1
 numpy==1.26.4
 soundfile==0.12.1
 sounddevice==0.4.7
+soundcard==0.4.3
+pywin32==306
 python-multipart==0.0.9
 webrtcvad==2.0.10
 faster-whisper==1.1.1
+requests==2.32.3
 python-docx==1.1.2
 tqdm==4.66.5

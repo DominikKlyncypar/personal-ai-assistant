@@ -23,6 +23,8 @@ class CaptureState:
     last_error: Optional[str] = None
     last_error_ts: Optional[float] = None
     controller: Any | None = None
+    loopback_backend: Optional[str] = None
+    loopback_device: Optional[str] = None
 
 
 @dataclass

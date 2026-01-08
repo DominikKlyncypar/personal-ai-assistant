@@ -91,6 +91,15 @@ def _get_or_load_model(state: State):
 def _transcribe_file(state: State, path: Path, language: Optional[str], beam_size: int) -> Dict[str, Any]:
     try:
         model = _get_or_load_model(state)
+    except ModuleNotFoundError as e:
+        if getattr(e, "name", None) == "requests":
+            return {"ok": False, "error": "Missing dependency 'requests'. Run: pip install -r worker/requirements.txt"}
+        try:
+            import logging
+            logging.getLogger("app").exception("whisper init failed")
+        except Exception:
+            pass
+        return {"ok": False, "error": f"whisper init failed: {e}"}
     except Exception as e:
         try:
             import logging
@@ -259,6 +268,15 @@ def transcribe_wav(state: State, path: str, language: Optional[str] = None, beam
                 peak = float(np.max(np.abs(y2)))
                 dur = float(len(y2) / 16000.0)
                 return {"ok": False, "error": f"No text produced (fallback). rms={rms:.6f} peak={peak:.3f} dur_s={dur:.2f}"}
+        except ModuleNotFoundError as e:
+            if getattr(e, "name", None) == "requests":
+                return {"ok": False, "error": "Missing dependency 'requests'. Run: pip install -r worker/requirements.txt"}
+            try:
+                import logging
+                logging.getLogger("app").exception("transcribe fallback failed")
+            except Exception:
+                pass
+            return {"ok": False, "error": f"transcribe fallback failed: {e}"}
         except Exception as e:
             try:
                 import logging
