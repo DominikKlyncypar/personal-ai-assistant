@@ -133,9 +133,11 @@ def create_app() -> FastAPI:
             _orig_init = _tqdm_std.tqdm.__init__
 
             def _safe_tqdm_init(self, *a, **k):  # type: ignore[no-redef]
-                _orig_init(self, *a, **k)
                 if getattr(self, "_lock", None) is None:
                     self._lock = _nullctx()  # ensure it supports "with"
+                _orig_init(self, *a, **k)
+                if getattr(self, "_lock", None) is None:
+                    self._lock = _nullctx()
 
             _tqdm_std.tqdm.__init__ = _safe_tqdm_init  # type: ignore[assignment]
         except Exception:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import logging
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -91,14 +92,13 @@ def _async_auto_transcribe(state: State, seconds: int):
             meeting_id=state.current_meeting_id,
         )
         if res.get("ok"):
-            print(f">>> Auto-transcribed {resp.get('filename')}")
+            logging.getLogger("app").info("auto-transcribed %s", resp.get("filename"))
         else:
-            print(f">>> Auto-transcribe error: {res}")
+            logging.getLogger("app").warning("auto-transcribe error: %s", res)
     except Exception as e:
         # Swallow async errors to avoid noisy thread exceptions
         try:
-            import logging
-            logging.getLogger("app").warning(f"auto_transcribe failed: {e}")
+            logging.getLogger("app").warning("auto_transcribe failed: %s", e)
         except Exception:
             pass
     finally:

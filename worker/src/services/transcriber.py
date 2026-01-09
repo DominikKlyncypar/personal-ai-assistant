@@ -12,6 +12,43 @@ from ..db import insert_utterance
 import numpy as np
 
 
+def _patch_tqdm_locks() -> None:
+    try:
+        from contextlib import nullcontext as _nullctx
+        import tqdm  # type: ignore
+        from tqdm import std as _tqdm_std  # type: ignore
+
+        def _patch_disabled(obj):
+            if obj is None:
+                return
+            try:
+                setattr(obj, "_lock", _nullctx())
+            except Exception:
+                pass
+            try:
+                if isinstance(obj, type):
+                    setattr(obj, "get_lock", staticmethod(lambda: _nullctx()))
+                else:
+                    setattr(obj, "get_lock", (lambda: _nullctx()))
+            except Exception:
+                pass
+
+        _patch_disabled(getattr(tqdm, "disabled_tqdm", None))
+        _patch_disabled(getattr(_tqdm_std, "disabled_tqdm", None))
+        try:
+            from tqdm import auto as _tqdm_auto  # type: ignore
+            _patch_disabled(getattr(_tqdm_auto, "disabled_tqdm", None))
+        except Exception:
+            pass
+        try:
+            import tqdm.utils as _tqdm_utils  # type: ignore
+            _patch_disabled(getattr(_tqdm_utils, "disabled_tqdm", None))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def _ensure_abs_tmp(state: State, p: Path) -> Path:
     return p if p.is_absolute() else (state.tmp_dir / p)
 
@@ -28,6 +65,7 @@ def _get_or_load_model(state: State):
     if state.whisper_model is not None:
         return state.whisper_model  # type: ignore[return-value]
     # Minimal config; can be extended to use Settings later
+    _patch_tqdm_locks()
     from faster_whisper import WhisperModel  # lazy import to avoid test env dependency
     # Harden HF Hub/Faster-Whisper progress handling to avoid tqdm lock issues
     try:

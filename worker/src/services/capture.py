@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import time
 import platform
+import os
 from pathlib import Path
 import numpy as np
 import wave
@@ -21,6 +22,36 @@ def _safe_lower(x):
         return str(x or "").lower()
     except Exception:
         return ""
+
+def _to_mono_f32(arr: np.ndarray, prefer: str = "mean") -> np.ndarray:
+    data = np.asarray(arr)
+    if data.ndim == 2:
+        if prefer == "max":
+            try:
+                rms = np.sqrt(np.mean(np.square(data.astype(np.float32, copy=False)), axis=0))
+                idx = int(np.argmax(rms)) if getattr(rms, "size", 0) else 0
+                mono = data[:, idx]
+            except Exception:
+                mono = data.mean(axis=1)
+        else:
+            mono = data.mean(axis=1)
+    else:
+        mono = data
+    if mono.dtype == np.int16:
+        return mono.astype(np.float32) / 32768.0
+    return mono.astype(np.float32, copy=False)
+
+def _read_gain(env_key: str, default: float) -> float:
+    raw = os.getenv(env_key)
+    if not raw:
+        return float(default)
+    try:
+        val = float(raw)
+    except Exception:
+        return float(default)
+    if not np.isfinite(val) or val <= 0:
+        return float(default)
+    return float(val)
 
 
 
@@ -48,6 +79,11 @@ class Capture:
         self._active_sources: List[str] = []
         self._mix_pending: Dict[str, np.ndarray] = {}
         self._mix_lock = threading.Lock()
+        # Prefer mic in mixed output; tune via env if needed
+        self._source_gains = {
+            "mic": _read_gain("WORKER_MIC_GAIN", 1.8),
+            "loopback": _read_gain("WORKER_LOOPBACK_GAIN", 1.0),
+        }
 
 
     def _resize_buffer(self):
@@ -99,12 +135,17 @@ class Capture:
                         break
                     take = min(lengths)
                     mix = np.zeros(take, dtype=np.float32)
+                    weight_sum = 0.0
                     for src in active:
                         seg = self._mix_pending[src][:take]
-                        mix[: len(seg)] += seg
+                        weight = float(self._source_gains.get(src, 1.0))
+                        if not np.isfinite(weight) or weight <= 0:
+                            weight = 1.0
+                        mix[: len(seg)] += seg * weight
+                        weight_sum += weight
                         self._mix_pending[src] = self._mix_pending[src][take:]
-                    if len(active) > 1:
-                        mix /= float(len(active))
+                    if weight_sum > 0:
+                        mix /= weight_sum
                     chunks.append(mix)
         for chunk in chunks:
             if chunk.size:
@@ -155,7 +196,8 @@ class Capture:
         dev_in = device_id if (device_id is not None and device_id >= 0) else None
         try:
             info = sd.query_devices(dev_in)
-            if int(info.get('max_input_channels', 0)) <= 0:
+            max_in = int(info.get('max_input_channels', 0))
+            if max_in <= 0:
                 raise RuntimeError("Selected device has no input channels")
         except Exception as e:
             raise RuntimeError(f"Invalid input device: {e}")
@@ -163,17 +205,32 @@ class Capture:
         target_samplerate = samplerate
         if multi_source and s.samplerate:
             target_samplerate = int(s.samplerate)
-        try:
-            sd.check_input_settings(device=dev_in, channels=1, samplerate=target_samplerate, dtype='float32')
-        except Exception:
+        ch_candidates = [2, 1] if max_in >= 2 else [1]
+        chosen_ch = None
+        for ch in ch_candidates:
+            try:
+                sd.check_input_settings(device=dev_in, channels=ch, samplerate=target_samplerate, dtype='float32')
+                chosen_ch = ch
+                break
+            except Exception:
+                continue
+        if chosen_ch is None:
             try:
                 sr_default = int(info.get('default_samplerate') or target_samplerate or 44100)
                 if multi_source and sr_default != target_samplerate:
                     raise RuntimeError(
                         f"Microphone device cannot run at required samplerate {target_samplerate} Hz to match loopback."
                     )
-                sd.check_input_settings(device=dev_in, channels=1, samplerate=sr_default, dtype='float32')
-                target_samplerate = sr_default
+                for ch in ch_candidates:
+                    try:
+                        sd.check_input_settings(device=dev_in, channels=ch, samplerate=sr_default, dtype='float32')
+                        chosen_ch = ch
+                        target_samplerate = sr_default
+                        break
+                    except Exception:
+                        continue
+                if chosen_ch is None:
+                    raise RuntimeError("No supported channel configuration")
             except Exception as e:
                 raise RuntimeError(f"Audio device not usable: {e}")
 
@@ -207,7 +264,7 @@ class Capture:
             try:
                 stream = sd.InputStream(
                     device=dev_in,
-                    channels=1,
+                    channels=int(chosen_ch or 1),
                     samplerate=samplerate,
                     blocksize=None,
                     dtype="float32",
@@ -227,8 +284,7 @@ class Capture:
                 while self.state.capture.running and source in self.streams:
                     try:
                         data, _ = stream.read(frames)
-                        mono = data[:, 0] if data.ndim == 2 else data
-                        self._emit_audio(source, mono)
+                        self._emit_audio(source, _to_mono_f32(data, prefer="max"))
                     except Exception as e:
                         with s.lock:
                             s.last_error = str(e)
@@ -248,8 +304,7 @@ class Capture:
             try:
                 if status:
                     self.logger.warning("mic callback status=%s", status)
-                mono = indata[:, 0] if indata.ndim == 2 else indata
-                self._emit_audio(source, mono)
+                self._emit_audio(source, _to_mono_f32(indata, prefer="max"))
             except Exception as e:
                 with s.lock:
                     s.last_error = str(e)
@@ -258,7 +313,7 @@ class Capture:
 
         stream_kwargs = dict(
             device=dev_in,
-            channels=1,
+            channels=int(chosen_ch or 1),
             samplerate=samplerate,
             blocksize=s.blocksize,
             dtype="float32",
@@ -447,8 +502,7 @@ class Capture:
                                     if data is None:
                                         time.sleep(0.01)
                                         continue
-                                    mono = data.mean(axis=1) if getattr(data, "ndim", 1) == 2 else data
-                                    self._emit_audio("loopback", mono.astype(np.float32, copy=False))
+                                    self._emit_audio("loopback", _to_mono_f32(data, prefer="mean"))
                             return
                         except Exception as e:
                             last_err = e
@@ -536,24 +590,11 @@ class Capture:
                         continue
             except Exception:
                 pass
-
-
-            def _to_mono_f32(arr):
-                data = np.asarray(arr)
-                if data.ndim == 2:
-                    mono = data.mean(axis=1)
-                else:
-                    mono = data
-                if mono.dtype == np.int16:
-                    return mono.astype(np.float32) / 32768.0
-                return mono.astype(np.float32, copy=False)
-
-
             def _loopback_callback(indata, frames, time_info, status):
                 try:
                     if status:
                         self.logger.warning("loopback callback status=%s", status)
-                    self._emit_audio("loopback", _to_mono_f32(indata))
+                    self._emit_audio("loopback", _to_mono_f32(indata, prefer="mean"))
                 except Exception as e:
                     with s.lock:
                         s.last_error = str(e)
@@ -863,7 +904,7 @@ class Capture:
                 while self.state.capture.running and "loopback" in self.streams:
                     try:
                         data, _ = stream.read(frames)
-                        self._emit_audio("loopback", _to_mono_f32(data))
+                        self._emit_audio("loopback", _to_mono_f32(data, prefer="mean"))
                         error_count = 0
                     except Exception as e:
                         error_count += 1

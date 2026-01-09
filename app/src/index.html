@@ -907,7 +907,6 @@
           const r = await fetch(`http://127.0.0.1:8000/v1/meeting/new?title=${encodeURIComponent(title)}`, { method:'POST' });
           if (!r.ok) throw new Error('HTTP '+r.status);
           const j = await r.json();
-          console.debug("[/meeting/new] response:", j);
 
           // FLEXIBLE: accept either {meeting_id} or {id}
           const id = getIdFlexible(j);
@@ -1092,6 +1091,8 @@
       const micSelect = document.getElementById("micSelect");
       const deviceHelp = document.getElementById("deviceHelp");
       const refreshBtn = document.getElementById("refreshDevices");
+      const DEVICE_PLAYBACK_KEY = "device.playback";
+      const DEVICE_MIC_KEY = "device.mic";
 
       async function loadDevicesOnce() {
         const res = await fetch("http://127.0.0.1:8000/v1/devices");
@@ -1114,28 +1115,9 @@
 
         const simpleLabels = (data.os === "Windows_NT" || data.os === "Windows");
         const outputIds = new Set();
-        const outputOptions = [];
 
         for (const d of data.outputs) {
-          const opt = document.createElement("option");
-          opt.value = String(d.id);
-          let label = d.name || `Device ${d.id}`;
-          const host = d.hostapi ? String(d.hostapi) : "";
-          if (host && !label.includes(host)) {
-            label += ` [${host}]`;
-          }
-          if (!simpleLabels && !host && d.hostapi) {
-            label += ` [${d.hostapi}]`;
-          }
-          if (d.is_loopback) {
-            if (!label.toLowerCase().includes("loopback")) {
-              label += " (loopback)";
-            }
-            opt.dataset.loopback = "1";
-          }
-          opt.textContent = label;
-          outputIds.add(opt.value);
-          outputOptions.push(opt);
+          outputIds.add(String(d.id));
         }
         const loopbackInputs = Array.isArray(data.loopback_inputs) ? data.loopback_inputs : [];
         const loopbackSpeakers = Array.isArray(data.loopback_speakers) ? data.loopback_speakers : [];
@@ -1172,14 +1154,6 @@
             playbackSelect.appendChild(grp);
           }
         }
-        if (outputOptions.length) {
-          const grp = document.createElement("optgroup");
-          grp.label = "Playback Outputs";
-          for (const opt of outputOptions) {
-            grp.appendChild(opt);
-          }
-          playbackSelect.appendChild(grp);
-        }
         for (const d of data.inputs) {
           const opt = document.createElement("option");
           opt.value = String(d.id);
@@ -1199,8 +1173,12 @@
           }
           return false;
         };
-        const hasOutputDefault = applyDefault(playbackSelect, defaults.output);
-        const hasInputDefault = applyDefault(micSelect, defaults.input);
+        const savedPlayback = localStorage.getItem(DEVICE_PLAYBACK_KEY);
+        const savedMic = localStorage.getItem(DEVICE_MIC_KEY);
+        const hasSavedPlayback = applyDefault(playbackSelect, savedPlayback);
+        const hasSavedMic = applyDefault(micSelect, savedMic);
+        const hasOutputDefault = hasSavedPlayback || applyDefault(playbackSelect, defaults.output);
+        const hasInputDefault = hasSavedMic || applyDefault(micSelect, defaults.input);
         if (!hasOutputDefault) {
           const loopOpt = playbackSelect.querySelector('option[data-loopback="1"]');
           if (loopOpt) {
@@ -1216,6 +1194,9 @@
         deviceHelp.textContent = (data.os === "Windows_NT" || data.os === "Windows")
           ? "Tip: pick a System Audio (WASAPI Loopback) item to capture system audio. Mic is optional."
           : "On macOS, loopback requires a virtual device. Mic works for development.";
+
+        localStorage.setItem(DEVICE_PLAYBACK_KEY, playbackSelect.value);
+        localStorage.setItem(DEVICE_MIC_KEY, micSelect.value);
       }
 
       async function loadDevicesWithRetry({ tries = 5, delayMs = 500 } = {}) {
@@ -1230,6 +1211,12 @@
         }
       }
       refreshBtn.addEventListener("click", () => loadDevicesWithRetry());
+      playbackSelect.addEventListener("change", () => {
+        localStorage.setItem(DEVICE_PLAYBACK_KEY, playbackSelect.value);
+      });
+      micSelect.addEventListener("change", () => {
+        localStorage.setItem(DEVICE_MIC_KEY, micSelect.value);
+      });
 
       // ---------------------------------------------------------------------
       // Capture controls (start/stop) + live level meter (GET /level)
