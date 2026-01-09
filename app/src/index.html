@@ -53,6 +53,8 @@
         --radius: 14px;
         --field-bg:#161b24;
         --field-text:#e8ecf1;
+        --font-body: "Calibri", "Segoe UI", "Trebuchet MS", sans-serif;
+        --font-display: "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
       }
       :root[data-theme="dark"]{
         color-scheme: dark;
@@ -86,6 +88,8 @@
         --shadow: 0 8px 24px rgba(0,0,0,0.08);
         --field-bg:#ffffff;
         --field-text:#10131a;
+        --font-body: "Calibri", "Segoe UI", "Trebuchet MS", sans-serif;
+        --font-display: "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
       }
 
       *{box-sizing:border-box}
@@ -96,13 +100,15 @@
                     radial-gradient(900px 600px at 110% 10%, rgba(63,180,255,0.08), transparent 40%),
                     var(--bg);
         color:var(--text);
-        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Inter, Helvetica, Arial, sans-serif;
+        font: 16px/1.6 var(--font-body);
       }
 
       /* Layout grid */
       .container{ max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
       header{ grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
       .brand{ display:flex; align-items:center; gap:12px; letter-spacing:0.2px; }
+      .brand-title{ font-family: var(--font-display); font-size:18px; font-weight:700; }
+      .brand-subtitle{ font-size:12px; }
       .logo{
         width:36px; height:36px; border-radius:10px;
         background: conic-gradient(from 220deg, var(--brand), var(--brand-2), var(--brand));
@@ -120,7 +126,12 @@
         position: relative;
         overflow: hidden;
       }
-      .card h2, .card h3{margin:0 0 10px 0; font-size:16px}
+      .card h2, .card h3{
+        margin:0 0 10px 0;
+        font-size:18px;
+        font-family: var(--font-display);
+        letter-spacing:0.2px;
+      }
       .card::before{
         content:""; position:absolute; inset: 0; pointer-events:none;
         background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.00)); opacity:.25;
@@ -136,13 +147,14 @@
       .stack{display:flex; flex-direction:column; gap:8px}
       .spaced{display:flex; align-items:center; justify-content:space-between; gap:12px}
       .muted{color:var(--muted)}
-      .help{font-size:12px; color:var(--muted); margin-top:6px}
+      .help{font-size:13px; color:var(--muted); margin-top:6px}
 
       /* Inputs & buttons */
       select, input[type="number"], input[type="text"], input[type="search"]{
         background-color: var(--field-bg); color:var(--field-text);
         border:1px solid var(--border);
-        border-radius:10px; padding:8px 10px; outline:none;
+        border-radius:10px; padding:10px 12px; outline:none;
+        font-size:14px; min-height:40px;
         transition: border-color .2s ease, background-color .2s ease, color .2s ease;
       }
       select:focus, input:focus{border-color: var(--brand)}
@@ -153,7 +165,8 @@
       button{
         appearance:none; border:1px solid var(--border); color:var(--text);
         background: linear-gradient(180deg, #1a1d25, #0f1218);
-        border-radius: 12px; padding:8px 12px; cursor:pointer;
+        border-radius: 12px; padding:9px 14px; cursor:pointer;
+        font-size:14px; min-height:40px;
         transition: transform .06s ease, border-color .2s ease, background .2s ease;
       }
       button:hover{transform: translateY(-1px); border-color: var(--brand)}
@@ -194,8 +207,8 @@
       /* Grid placement */
       .col-span-2{grid-column: 1 / -1}
       .devices{grid-column: 1 / -1}
-      .audio{grid-column: 1 / 2}
-      .vad{grid-column: 2 / 3}
+      .audio{grid-column: 1 / -1}
+      .vad{grid-column: 1 / -1}
       .transcripts{grid-column: 1 / -1}
 
       @media (max-width: 920px){
@@ -237,48 +250,48 @@
         <div class="brand">
           <div class="logo"></div>
           <div>
-            <div style="font-weight:700">AI Assistant</div>
-            <div class="subtle" style="font-size:12px">Desktop capture · Whisper · Notes</div>
+            <div class="brand-title">AI Assistant</div>
+            <div class="brand-subtitle subtle">Desktop capture - Whisper - Notes</div>
           </div>
         </div>
         <div class="row">
-          <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode" aria-label="Toggle light or dark mode">☀️/🌙</button>
+          <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode" aria-label="Toggle light or dark mode">Toggle theme</button>
           <span id="appVersionBadge" class="status muted" title="Application version">v?.?.?</span>
           <span class="muted">Worker:</span>
-          <span id="workerStatus" class="status muted">Checking…</span>
+          <span id="workerStatus" class="status muted">Checking...</span>
         </div>
       </header>
 
       <!-- =================================================================== -->
       <!-- Meeting Controls                                                     -->
-      <!-- Create → Start → Stop; we persist the active meeting id locally.    -->
+      <!-- Create -> Start -> Stop; we persist the active meeting id locally.    -->
       <!-- =================================================================== -->
       <section class="card" id="meetingCard" style="grid-column: 1 / -1">
         <div class="spaced">
-          <h2>Meeting</h2>
+          <h2>Step 1: Meeting</h2>
           <span class="status muted" id="meetingStatus">No active meeting</span>
         </div>
 
         <div class="row" style="margin-top:8px">
-          <input id="meetingTitleInput" placeholder="e.g., Client – Living Room Consult" style="width:300px" />
+          <input id="meetingTitleInput" placeholder="e.g., Client - Living Room Consult" style="width:300px" />
           <button id="newMeetingBtn" class="btn-primary btn-icon" title="Create a new meeting">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-            New
+            Create Meeting
           </button>
           <button id="startMeetingBtn" class="btn-ghost btn-icon" title="Set active meeting">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="6,4 20,12 6,20 6,4"/></svg>
-            Start
+            Set Active
           </button>
           <button id="stopMeetingBtn" class="btn-ghost btn-icon" title="Clear active meeting">
             <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-            Stop
+            Clear Active
           </button>
         </div>
 
         <!-- Existing meetings selector -->
         <div class="row" style="margin-top:8px">
           <label class="stack" style="min-width:320px">
-            <span class="muted">Select existing meeting</span>
+            <span class="muted">Existing meetings</span>
             <select id="meetingSelect"></select>
           </label>
           <button id="refreshMeetingListBtn" class="btn-ghost btn-icon" title="Refresh meeting list">
@@ -287,74 +300,43 @@
           </button>
           <button id="loadFullBtn" class="btn-ghost btn-icon" title="Load full transcript into view">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h8M8 12h8M8 18h8"/></svg>
-            Load Full Transcript
+            Load Full
           </button>
           <button id="deleteMeetingBtn" class="btn-ghost btn-icon" title="Delete selected meeting and its transcripts">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6v12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2V6M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
-            Delete
+            Delete Meeting
           </button>
         </div>
-
-        <!-- Export + speaker labeling controls (collapsible) -->
-        <details class="collapsible" style="margin-top:12px">
-          <summary class="muted" style="cursor:pointer">Export & Speaker Options</summary>
-          <div class="stack" style="margin-top:10px">
-            <div class="row" style="gap:12px; align-items:center">
-              <label class="row" style="gap:8px">
-                <span class="muted">Speaker labels</span>
-                <select id="speakersMode">
-                  <option value="0">None</option>
-                  <option value="heuristic">Heuristic</option>
-                  <option value="auto">Auto (embeddings)</option>
-                </select>
-              </label>
-              <label class="row" style="gap:8px">
-                <span class="muted">Max speakers</span>
-                <input type="number" id="maxSpeakers" min="1" max="20" placeholder="e.g., 5" style="width:80px" />
-              </label>
-
-              <button id="exportJsonBtn" class="btn-ghost btn-icon" title="Open JSON export in a new tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 8h8v8H8z"/></svg>
-                Export JSON
-              </button>
-              <button id="exportMdBtn" class="btn-ghost btn-icon" title="Open Markdown export in a new tab">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 12h10M7 8h10M7 16h6"/></svg>
-                Export MD
-              </button>
-            </div>
-            <div class="help">Exports use the current meeting and optional speaker mode.</div>
-          </div>
-        </details>
 
         <!-- Summary controls (kept prominent) -->
         <div class="row" style="gap:12px; align-items:center; margin-top:10px">
           <button id="openSummaryBtn" class="btn-ghost btn-icon" title="Open quick summary preview">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6m0-4V4"/><circle cx="12" cy="12" r="9"/></svg>
-            Summary
+            Open Summary
           </button>
           <button id="exportNotesMdBtn" class="btn-ghost btn-icon" title="Open notes (Markdown) in a new tab">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 8h10M7 12h10M7 16h6"/></svg>
-            Notes MD
+            Open Notes (MD)
           </button>
           <button id="saveNotesBtn" class="btn-ghost btn-icon" title="Save notes to exports/ as Markdown">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-            Save Notes
+            Save Notes (MD)
           </button>
           <button id="saveDocxBtn" class="btn-ghost btn-icon" title="Save notes to exports/ as DOCX">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M7 8h5M7 12h8M7 16h10"/></svg>
-            Save DOCX
+            Save Notes (DOCX)
           </button>
           <label class="row" style="gap:6px; margin-left:8px" title="Use stricter rewrite to avoid verbatim quotes">
             <input type="checkbox" id="summaryStrictToggle" />
-            <span class="muted">Strict rewrite</span>
+            <span class="muted">Rewrite to avoid quotes</span>
           </label>
           <button id="regenSummaryBtn" class="btn-ghost btn-icon" title="Regenerate notes (recompute via model)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
-            Regenerate
+            Regenerate Summary
           </button>
         </div>
 
-        <div class="help" id="meetingHelp">Create a meeting, then click Start to make it active. Utterances will attach automatically.</div>
+        <div class="help" id="meetingHelp">Create or select a meeting, then click Set Active. Transcripts attach automatically.</div>
       </section>
 
       <!-- =================================================================== -->
@@ -362,14 +344,14 @@
       <!-- On Windows, loopback from speakers will grab system audio.          -->
       <!-- =================================================================== -->
       <section class="card devices">
-        <h2>Audio Devices</h2>
+        <h2>Step 2: Audio Devices</h2>
         <div class="row">
           <label class="stack" style="min-width:260px">
-            <span class="muted">System Audio (WASAPI loopback)</span>
+            <span class="muted">System audio (loopback)</span>
             <select id="playbackSelect"></select>
           </label>
           <label class="stack" style="min-width:260px">
-            <span class="muted">Microphone (optional)</span>
+            <span class="muted">Microphone (your voice)</span>
             <select id="micSelect"></select>
           </label>
           <div class="row">
@@ -382,7 +364,7 @@
             </button>
           </div>
         </div>
-        <div id="deviceHelp" class="help">Loading devices...</div>
+        <div id="deviceHelp" class="help">Pick system audio for meeting sound, and a mic for your voice.</div>
       </section>
 
       <!-- =================================================================== -->
@@ -390,17 +372,17 @@
       <!-- =================================================================== -->
       <section class="card audio">
         <div class="spaced">
-          <h2>Capture</h2>
+          <h2>Step 3: Capture</h2>
           <div class="row">
             <button id="startBtn" class="btn-primary btn-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="6,4 20,12 6,20 6,4"></polygon>
               </svg>
-              Start
+              Start Recording
             </button>
             <button id="stopBtn" class="btn-ghost btn-icon">
               <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-              Stop
+              Stop Recording
             </button>
             <span id="capStatus" class="status muted">Stopped</span>
           </div>
@@ -408,33 +390,34 @@
 
         <div class="row" style="margin-top:10px">
           <div id="levelMeter"><div id="levelBar"></div></div>
-          <span id="levelLabel" class="muted">Level: (waiting) | ~dB: —</span>
+          <span id="levelLabel" class="muted">Level: (waiting) | ~dB: --</span>
         </div>
+        <div class="help">Start recording, then speak. Auto-transcribe runs when you stop talking.</div>
 
           <div class="row" style="margin-top:12px">
-          <button id="manualTranscribeBtn" class="btn-ghost">Transcribe last 10s</button>
+          <button id="manualTranscribeBtn" class="btn-ghost">Transcribe last 10 seconds</button>
           <span id="manualTrStatus" class="muted"></span>
         </div>
       </section>
 
       <!-- =================================================================== -->
-      <!-- Voice Activity + event log + preferences (noise gate, VAD, autoTR)  -->
+      <!-- Speech detection + event log + preferences (noise gate, VAD, autoTR) -->
       <!-- =================================================================== -->
       <section class="card vad">
-        <h2>Voice Activity</h2>
+        <h2>Speech Detection</h2>
         <div class="row" style="margin-top:4px">
           <div id="vadDot"></div>
           <span id="vadLabel" class="muted">Speech: (idle)</span>
         </div>
 
         <details class="collapsible" style="margin-top:12px">
-          <summary class="muted" style="cursor:pointer">Advanced: VAD Log & Preferences</summary>
+          <summary class="muted" style="cursor:pointer">Advanced settings (optional)</summary>
           <div class="stack" style="margin-top:10px">
-            <strong>Speech events</strong>
+            <strong>Speech log</strong>
             <div class="row">
               <button id="clearLogBtn" class="btn-ghost">Clear</button>
             </div>
-            <div id="speechLog"><em>Waiting…</em></div>
+            <div id="speechLog"><em>Waiting...</em></div>
           </div>
 
           <div class="stack" style="margin-top:14px">
@@ -455,18 +438,46 @@
               </label>
               <label class="row" style="gap:8px">
                 <input type="checkbox" id="autoTrToggle" checked />
-                <span class="muted">Auto transcribe on speech end</span>
+                <span class="muted">Auto transcribe when you stop talking</span>
               </label>
               <label class="row" style="gap:8px">
-                <span class="muted">Auto window (s)</span>
+                <span class="muted">Auto window (seconds)</span>
                 <input type="number" id="autoTrSecondsInput" min="5" max="180" step="5" style="width:80px" />
               </label>
               <label class="row" style="gap:8px">
-                <span class="muted">Silence hangover (ms)</span>
+                <span class="muted">Silence wait (ms)</span>
                 <input type="number" id="hangoverInput" min="500" max="8000" step="100" style="width:100px" />
               </label>
             </div>
             <span class="help">Values are saved locally and sent to the worker.</span>
+          </div>
+
+          <div class="stack" style="margin-top:14px">
+            <h3>Summary Provider</h3>
+            <div class="row" style="gap:12px">
+              <label class="row" style="gap:8px">
+                <span class="muted">Provider</span>
+                <select id="summaryProviderSelect">
+                  <option value="auto">Auto</option>
+                  <option value="groq">Groq</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </label>
+              <label class="row" style="gap:8px">
+                <span class="muted">Groq Model</span>
+                <input type="text" id="groqModelInput" placeholder="llama-3.1-70b-versatile" style="width:220px" />
+              </label>
+            </div>
+            <div class="row" style="gap:12px">
+              <label class="row" style="gap:8px">
+                <span class="muted">Groq API Key</span>
+                <input type="password" id="groqKeyInput" placeholder="gsk_..." style="width:260px" />
+              </label>
+              <button id="saveSummaryConfigBtn" class="btn-ghost">Save Key</button>
+              <button id="clearSummaryConfigBtn" class="btn-ghost">Remove Key</button>
+              <span id="summaryConfigStatus" class="muted"></span>
+            </div>
+            <span class="help">Stored locally and sent to the worker. Keep your key private.</span>
           </div>
         </details>
       </section>
@@ -476,7 +487,7 @@
       <!-- =================================================================== -->
       <section class="card transcripts col-span-2">
         <div class="spaced">
-          <h2>Transcripts</h2>
+          <h2>Step 4: Transcripts</h2>
         </div>
         <div id="transcriptBox" style="margin-top:10px"><em>No transcripts yet.</em></div>
       </section>
@@ -558,7 +569,7 @@
             logFileHint = info.logPath;
             if (appVersionBadge) {
               appVersionBadge.dataset.logPath = logFileHint;
-              appVersionBadge.title = `Version ${appVersion} • Logs: ${logFileHint}`;
+              appVersionBadge.title = `Version ${appVersion} - Logs: ${logFileHint}`;
             }
           }
         });
@@ -597,6 +608,16 @@
       const autoTrToggle   = document.getElementById('autoTrToggle');
       const autoTrSecondsInput = document.getElementById('autoTrSecondsInput');
       const hangoverInput  = document.getElementById('hangoverInput');
+      const summaryProviderSelect = document.getElementById('summaryProviderSelect');
+      const groqModelInput = document.getElementById('groqModelInput');
+      const groqKeyInput = document.getElementById('groqKeyInput');
+      const saveSummaryConfigBtn = document.getElementById('saveSummaryConfigBtn');
+      const clearSummaryConfigBtn = document.getElementById('clearSummaryConfigBtn');
+      const summaryConfigStatus = document.getElementById('summaryConfigStatus');
+
+      const SUMMARY_PROVIDER_KEY = 'summary.provider';
+      const GROQ_MODEL_KEY = 'summary.groq_model';
+      const GROQ_KEY_KEY = 'summary.groq_key';
 
       async function sendAutoConfig({ enable, windowSec, hangoverMs } = {}){
         const body = {};
@@ -609,6 +630,29 @@
             body: JSON.stringify(body)
           });
         } catch (e) { console.warn('auto_config failed', e); }
+      }
+
+      async function sendSummaryConfig({ provider, groqKey, groqModel } = {}) {
+        const body = {};
+        if (typeof provider === 'string') body.provider = provider;
+        if (typeof groqKey === 'string') body.groq_api_key = groqKey;
+        if (typeof groqModel === 'string') body.groq_model = groqModel;
+        if (summaryConfigStatus) summaryConfigStatus.textContent = 'Saving...';
+        try {
+          const r = await fetch('http://127.0.0.1:8000/v1/summary_config', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const j = await r.json();
+          if (summaryConfigStatus) {
+            const p = j && j.provider ? j.provider : (provider || 'auto');
+            summaryConfigStatus.textContent = `Saved (${p})`;
+          }
+        } catch (e) {
+          if (summaryConfigStatus) summaryConfigStatus.textContent = 'Save failed';
+          console.warn('summary_config failed', e);
+        }
       }
 
       /** Load preferences from localStorage or init defaults. */
@@ -633,9 +677,22 @@
         if (hangoverInput) hangoverInput.value = String(hangMs);
         // Reflect chosen seconds in manual button label
         const manualBtnEl = document.getElementById('manualTranscribeBtn');
-        if (manualBtnEl) manualBtnEl.textContent = `Transcribe last ${autoTrSec}s`;
+        if (manualBtnEl) manualBtnEl.textContent = `Transcribe last ${autoTrSec} seconds`;
         // Inform backend: backend will handle auto-transcribe on speech end
         sendAutoConfig({ enable: autoTrToggle.checked, windowSec: autoTrSec, hangoverMs: hangMs }).catch(()=>{});
+      }
+      function loadSummaryPrefs() {
+        if (!summaryProviderSelect || !groqKeyInput || !groqModelInput) return;
+        let provider = localStorage.getItem(SUMMARY_PROVIDER_KEY) || '';
+        const groqKey = localStorage.getItem(GROQ_KEY_KEY) || '';
+        const groqModel = localStorage.getItem(GROQ_MODEL_KEY) || '';
+        if (!provider) provider = groqKey ? 'groq' : 'auto';
+        summaryProviderSelect.value = provider;
+        groqKeyInput.value = groqKey;
+        groqModelInput.value = groqModel || 'llama-3.1-70b-versatile';
+        if (!localStorage.getItem(SUMMARY_PROVIDER_KEY)) {
+          localStorage.setItem(SUMMARY_PROVIDER_KEY, provider);
+        }
       }
       // Persist changes
       noiseGateInput.addEventListener('change', () => localStorage.setItem('noiseGateDb', noiseGateInput.value));
@@ -658,7 +715,7 @@
         const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 1000));
         sendAutoConfig({ enable: autoTrToggle.checked, windowSec: v, hangoverMs: hang }).catch(()=>{});
         const manualBtnEl = document.getElementById('manualTranscribeBtn');
-        if (manualBtnEl) manualBtnEl.textContent = `Transcribe last ${v}s`;
+        if (manualBtnEl) manualBtnEl.textContent = `Transcribe last ${v} seconds`;
       });
       hangoverInput.addEventListener('change', () => {
         let h = parseInt(hangoverInput.value || '1000', 10);
@@ -669,6 +726,30 @@
         const v = parseInt(localStorage.getItem('autoTrSec') || '180', 10);
         const secs = Math.max(5, Math.min(180, Number.isFinite(v) ? v : 180));
         sendAutoConfig({ enable: autoTrToggle.checked, windowSec: secs, hangoverMs: h }).catch(()=>{});
+      });
+      saveSummaryConfigBtn?.addEventListener('click', () => {
+        if (!summaryProviderSelect || !groqKeyInput || !groqModelInput) return;
+        localStorage.setItem(SUMMARY_PROVIDER_KEY, summaryProviderSelect.value);
+        localStorage.setItem(GROQ_KEY_KEY, groqKeyInput.value);
+        localStorage.setItem(GROQ_MODEL_KEY, groqModelInput.value);
+        sendSummaryConfig({
+          provider: summaryProviderSelect.value,
+          groqKey: groqKeyInput.value,
+          groqModel: groqModelInput.value,
+        }).catch(()=>{});
+      });
+      const markSummaryDirty = () => {
+        if (summaryConfigStatus) summaryConfigStatus.textContent = 'Not saved';
+      };
+      summaryProviderSelect?.addEventListener('change', markSummaryDirty);
+      groqModelInput?.addEventListener('input', markSummaryDirty);
+      groqKeyInput?.addEventListener('input', markSummaryDirty);
+      clearSummaryConfigBtn?.addEventListener('click', () => {
+        if (!summaryProviderSelect || !groqKeyInput || !groqModelInput) return;
+        groqKeyInput.value = '';
+        localStorage.removeItem(GROQ_KEY_KEY);
+        sendSummaryConfig({ groqKey: '' }).catch(()=>{});
+        if (summaryConfigStatus) summaryConfigStatus.textContent = 'Cleared';
       });
 
       // ---------------------------------------------------------------------
@@ -765,7 +846,7 @@
         const serverMeta = hasServerId && serverMeetingId ? meetingMetaById[serverMeetingId] : null;
         let serverTxt;
         if (!hasServerId) {
-          serverTxt = '…';
+          serverTxt = '...';
         } else if (serverMeetingId === 0) {
           serverTxt = 'none';
         } else {
@@ -794,7 +875,7 @@
       function labelForMeeting(it){
         const dt = (it && it.created_at) ? String(it.created_at) : '';
         const title = (it && it.title) ? String(it.title) : 'Untitled';
-        return dt ? `${dt} — ${title}` : title;
+        return dt ? `${dt} - ${title}` : title;
       }
 
       async function fetchMeetingList() {
@@ -987,28 +1068,14 @@
       }
 
       // ---------------------------------------------------------------------
+      // Summary + export handlers
       // ---------------------------------------------------------------------
-      // Export handlers (JSON / MD / Summary) with optional speaker mode
-      // ---------------------------------------------------------------------
-      const speakersModeSel = document.getElementById('speakersMode');
-      const maxSpeakersInp  = document.getElementById('maxSpeakers');
-      const exportJsonBtn   = document.getElementById('exportJsonBtn');
-      const exportMdBtn     = document.getElementById('exportMdBtn');
       const openSummaryBtn  = document.getElementById('openSummaryBtn');
       const exportNotesMdBtn= document.getElementById('exportNotesMdBtn');
       const saveNotesBtn    = document.getElementById('saveNotesBtn');
       const saveDocxBtn     = document.getElementById('saveDocxBtn');
       const summaryStrictToggle = document.getElementById('summaryStrictToggle');
       const regenSummaryBtn = document.getElementById('regenSummaryBtn');
-
-      function buildSpeakerQuery() {
-        const mode = (speakersModeSel?.value || '0');
-        const maxS = (maxSpeakersInp?.value || '').trim();
-        const params = new URLSearchParams();
-        if (mode && mode !== '0') params.set('speakers', mode);
-        if (maxS) params.set('max_speakers', String(Math.max(1, Math.min(20, Number(maxS)))));
-        return params.toString();
-      }
 
       function ensureMeetingOrToast() {
         if (!activeMeetingId) {
@@ -1017,20 +1084,6 @@
         }
         return true;
       }
-
-      exportJsonBtn?.addEventListener('click', () => {
-        if (!ensureMeetingOrToast()) return;
-        const q = buildSpeakerQuery();
-        const url = `http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/export.json` + (q ? `?${q}` : '');
-        window.open(url, '_blank', 'noopener,noreferrer');
-      });
-
-      exportMdBtn?.addEventListener('click', () => {
-        if (!ensureMeetingOrToast()) return;
-        const q = buildSpeakerQuery();
-        const url = `http://127.0.0.1:8000/v1/meeting/${activeMeetingId}/export.md` + (q ? `?${q}` : '');
-        window.open(url, '_blank', 'noopener,noreferrer');
-      });
 
       openSummaryBtn?.addEventListener('click', () => {
         if (!ensureMeetingOrToast()) return;
@@ -1123,7 +1176,7 @@
         const loopbackSpeakers = Array.isArray(data.loopback_speakers) ? data.loopback_speakers : [];
         if (loopbackInputs.length || loopbackSpeakers.length) {
           const grp = document.createElement("optgroup");
-          grp.label = "System Audio (WASAPI Loopback)";
+          grp.label = "System Audio (Loopback)";
           for (const d of loopbackInputs) {
             const idStr = String(d.id);
             if (outputIds.has(idStr)) continue;
@@ -1192,7 +1245,7 @@
         }
 
         deviceHelp.textContent = (data.os === "Windows_NT" || data.os === "Windows")
-          ? "Tip: pick a System Audio (WASAPI Loopback) item to capture system audio. Mic is optional."
+          ? "Pick system audio for meeting sound, and a mic for your voice."
           : "On macOS, loopback requires a virtual device. Mic works for development.";
 
         localStorage.setItem(DEVICE_PLAYBACK_KEY, playbackSelect.value);
@@ -1245,7 +1298,7 @@
           if (!r.ok) throw new Error("HTTP " + r.status);
           const j = await r.json();
           captureRunning = !!j.running;
-          capStatus.textContent = captureRunning ? "Capturing…" : "Stopped";
+          capStatus.textContent = captureRunning ? "Capturing..." : "Stopped";
           setRunButtons(captureRunning);
           styleCapStatus(captureRunning);
           return captureRunning;
@@ -1266,7 +1319,7 @@
         const pct = rmsToPercent(smoothedRms); const db = rmsToDb(smoothedRms);
         bar.style.width = `${pct.toFixed(0)}%`;
         label.textContent = running ? `Level: ${smoothedRms.toFixed(4)} (${pct.toFixed(0)}%) | ~dB: ${db.toFixed(1)}`
-                                    : "Level: stopped | ~dB: —";
+                                    : "Level: stopped | ~dB: --";
       }
       let levelTimer=null;
       async function pollLevelOnce(){
@@ -1304,7 +1357,7 @@
       let autoTrCooldown = false;   // short cooldown after transcribe
       let autoTrBusy = false;       // avoid concurrent auto runs
 
-      /** Poll VAD and trigger auto-transcribe when speech → silence. */
+      /** Poll VAD and trigger auto-transcribe when speech -> silence. */
       async function pollVadOnce(){
         const ng=noiseGateInput.value||-40, vad=vadAggSelect.value||3;
         const r=await fetch(`http://127.0.0.1:8000/v1/vad_check?ng=${encodeURIComponent(ng)}&vad=${encodeURIComponent(vad)}`);
@@ -1327,7 +1380,7 @@
       function startVadPolling(){ if(vadTimer) return; pollVadOnce().catch(()=>{}); vadTimer=setInterval(()=>{ pollVadOnce().catch(()=>{}); },100); }
       function stopVadPolling(){ if(vadTimer){ clearInterval(vadTimer); vadTimer=null; } setVadUI({speech:false, running:false}); lastStableSpeech=null; }
 
-      // ----- Transcripts (MEETING-AWARE) — adaptive polling to reduce spam -----
+      // ----- Transcripts (MEETING-AWARE) - adaptive polling to reduce spam -----
       const transcriptBox = document.getElementById('transcriptBox');
       const sinceIdByMeeting = Object.create(null);
       let trTimer = null;        // handle for setTimeout loop
@@ -1353,7 +1406,7 @@
         const div=document.createElement('div'); div.className='utt';
         const tm=document.createElement('time'); tm.textContent=`[${t.ts_iso}]`;
         const span=document.createElement('span'); span.textContent=t.text;
-        const meta=document.createElement('small'); meta.textContent=`(${t.filename || '—'})`;
+        const meta=document.createElement('small'); meta.textContent=`(${t.filename || '--'})`;
         div.appendChild(tm);
         div.appendChild(span);
         const b = confBadge(t.confidence); if (b) div.appendChild(b);
@@ -1405,7 +1458,7 @@
       
       // ---------------------------------------------------------------------
       // Auto-transcribe helper
-      // Simple 2-step: dump last N seconds → transcribe → refresh list
+      // Simple 2-step: dump last N seconds -> transcribe -> refresh list
       // ---------------------------------------------------------------------
       async function autoTranscribeLast(seconds = 180){
         if (autoTrBusy || autoTrCooldown) return;
@@ -1438,7 +1491,7 @@
       const manualBtn=document.getElementById('manualTranscribeBtn');
       const manualLabel=document.getElementById('manualTrStatus');
       manualBtn.addEventListener('click', async ()=>{
-        manualLabel.textContent='Working…';
+        manualLabel.textContent='Working...';
         try{
           // Use configured auto window seconds for manual transcribes too
           const v = parseInt((autoTrSecondsInput && autoTrSecondsInput.value) ? autoTrSecondsInput.value : (localStorage.getItem('autoTrSec') || '180'), 10);
@@ -1464,6 +1517,7 @@
       // ---------------------------------------------------------------------
       (async function boot(){
         loadPreferences();
+        loadSummaryPrefs();
         loadActiveMeetingId();                 // meeting id from localStorage
         await refreshServerMeetingStatus();    // show server status early
         const online=await waitForWorkerOnline();
@@ -1479,6 +1533,12 @@
             const hang = Math.max(500, Math.min(8000, Number.isFinite(h) ? h : 1000));
             await sendAutoConfig({ enable: document.getElementById('autoTrToggle').checked, windowSec: secs, hangoverMs: hang });
           } catch {}
+          try {
+            const provider = summaryProviderSelect ? summaryProviderSelect.value : (localStorage.getItem(SUMMARY_PROVIDER_KEY) || 'auto');
+            const groqKey = groqKeyInput ? groqKeyInput.value : (localStorage.getItem(GROQ_KEY_KEY) || '');
+            const groqModel = groqModelInput ? groqModelInput.value : (localStorage.getItem(GROQ_MODEL_KEY) || '');
+            await sendSummaryConfig({ provider, groqKey, groqModel });
+          } catch {}
           await loadDevicesWithRetry();
           await refreshCaptureStatus();
           startTranscriptPolling();            // will only render if activeMeetingId is set
@@ -1492,7 +1552,7 @@
 
       // Hook capture start/stop to backend + begin/stop polling loops
       startBtn.addEventListener("click", async ()=>{
-        capStatus.textContent="Starting…";
+        capStatus.textContent="Starting...";
         try{
           // Ensure server has the same active meeting as the UI
           if (activeMeetingId) {
@@ -1530,7 +1590,7 @@
       });
 
       stopBtn.addEventListener("click", async ()=>{
-        capStatus.textContent="Stopping…";
+        capStatus.textContent="Stopping...";
         try{ await fetch("http://127.0.0.1:8000/v1/stop_capture",{ method:"POST" }); }catch{}
         stopLevelPolling();
         stopVadPolling();

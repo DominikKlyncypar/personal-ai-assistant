@@ -10,6 +10,7 @@ from .routers.capture import router as capture_router
 from .routers.transcribe import router as transcribe_router
 from .routers.vad import router as vad_router
 from .routers.auto import router as auto_router
+from .routers.summary_config import router as summary_config_router
 from .config import load_settings
 from .logging import setup_logging, install_app_logging
 from .errors import install_error_handlers
@@ -199,6 +200,7 @@ def create_app() -> FastAPI:
     app.include_router(transcribe_router, prefix="/v1")
     app.include_router(vad_router, prefix="/v1")
     app.include_router(auto_router, prefix="/v1")
+    app.include_router(summary_config_router, prefix="/v1")
 
     # Basic health endpoint (for Electron pings)
     @app.get("/health")

@@ -622,19 +622,75 @@ def summary_diagnostics() -> Dict[str, Any]:
         "groq_key": bool(os.getenv("GROQ_API_KEY")),
         "model": model_hint,
     }
-    try:
-        # Tiny probe — low cost, should exercise the chosen provider
-        msg = [
+    def _probe_openai(model: str) -> Optional[str]:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return "OPENAI_API_KEY not set"
+        payload = {"model": model, "messages": [
             {"role": "system", "content": "Respond with OK only."},
             {"role": "user", "content": "Say OK"},
-        ]
-        out = _chat_via_provider(msg, temperature=0.0)
-        info["probe_ok"] = bool(out and out.strip().lower().startswith("ok"))
-        if out:
-            info["probe_sample"] = out[:80]
-    except Exception as e:
-        info["probe_ok"] = False
-        info["error"] = str(e)
+        ], "temperature": 0.0}
+        base = os.getenv("OPENAI_API_BASE") or "https://api.openai.com/v1"
+        try:
+            res = _http_post(
+                f"{base.rstrip('/')}/chat/completions",
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                data=payload,
+            )
+            content = (
+                res.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if content:
+                info["probe_sample"] = content[:80]
+                return None
+            return "OpenAI probe returned empty response"
+        except Exception as e:
+            return str(e)
+
+    def _probe_groq(model: str) -> Optional[str]:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            return "GROQ_API_KEY not set"
+        payload = {"model": model, "messages": [
+            {"role": "system", "content": "Respond with OK only."},
+            {"role": "user", "content": "Say OK"},
+        ], "temperature": 0.0}
+        base = os.getenv("GROQ_API_BASE") or "https://api.groq.com/openai/v1"
+        try:
+            res = _http_post(
+                f"{base.rstrip('/')}/chat/completions",
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+                data=payload,
+            )
+            content = (
+                res.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if content:
+                info["probe_sample"] = content[:80]
+                return None
+            return "Groq probe returned empty response"
+        except Exception as e:
+            return str(e)
+
+    err = None
+    if provider == "openai":
+        err = _probe_openai(model_hint or os.getenv("WORKER_SUMMARY_MODEL", "gpt-4o-mini"))
+    elif provider == "groq":
+        err = _probe_groq(model_hint or os.getenv("WORKER_GROQ_MODEL") or os.getenv("GROQ_MODEL") or "llama-3.1-70b-versatile")
+    else:
+        # auto: try openai then groq
+        err = _probe_openai(os.getenv("WORKER_SUMMARY_MODEL", "gpt-4o-mini"))
+        if err:
+            err = _probe_groq(os.getenv("WORKER_GROQ_MODEL") or os.getenv("GROQ_MODEL") or "llama-3.1-70b-versatile")
+    info["probe_ok"] = err is None
+    if err:
+        info["error"] = err
     return info
 
 
