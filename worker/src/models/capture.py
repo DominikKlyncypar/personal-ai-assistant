@@ -38,3 +38,14 @@ class DumpWavResponse(BaseModel):
     seconds: int
     samplerate: int
     samples: int
+
+
+class MixConfigRequest(BaseModel):
+    mic_gain: Optional[float] = Field(default=None, ge=0.1, le=5.0)
+    loopback_gain: Optional[float] = Field(default=None, ge=0.1, le=5.0)
+
+
+class MixConfigResponse(BaseModel):
+    ok: bool
+    mic_gain: float
+    loopback_gain: float

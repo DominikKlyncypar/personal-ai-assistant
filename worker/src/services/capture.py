@@ -79,11 +79,24 @@ class Capture:
         self._active_sources: List[str] = []
         self._mix_pending: Dict[str, np.ndarray] = {}
         self._mix_lock = threading.Lock()
-        # Prefer mic in mixed output; tune via env if needed
-        self._source_gains = {
-            "mic": _read_gain("WORKER_MIC_GAIN", 1.8),
-            "loopback": _read_gain("WORKER_LOOPBACK_GAIN", 1.0),
-        }
+        # Prefer mic in mixed output; env can override defaults
+        self.state.capture.mic_gain = _read_gain("WORKER_MIC_GAIN", self.state.capture.mic_gain)
+        self.state.capture.loopback_gain = _read_gain("WORKER_LOOPBACK_GAIN", self.state.capture.loopback_gain)
+
+    def _get_source_gain(self, source: str) -> float:
+        if source == "mic":
+            val = self.state.capture.mic_gain
+        elif source == "loopback":
+            val = self.state.capture.loopback_gain
+        else:
+            val = 1.0
+        try:
+            val = float(val)
+        except Exception:
+            val = 1.0
+        if not np.isfinite(val) or val <= 0:
+            val = 1.0
+        return max(0.1, min(5.0, val))
 
 
     def _resize_buffer(self):
@@ -138,9 +151,7 @@ class Capture:
                     weight_sum = 0.0
                     for src in active:
                         seg = self._mix_pending[src][:take]
-                        weight = float(self._source_gains.get(src, 1.0))
-                        if not np.isfinite(weight) or weight <= 0:
-                            weight = 1.0
+                        weight = self._get_source_gain(src)
                         mix[: len(seg)] += seg * weight
                         weight_sum += weight
                         self._mix_pending[src] = self._mix_pending[src][take:]
@@ -1014,6 +1025,23 @@ def _write_wav(path: str, samplerate: int, mono_f32: np.ndarray) -> None:
         wf.setframerate(int(samplerate))
         wf.writeframes(pcm16.tobytes())
 
+def set_mix_config(state: State, mic_gain: float | None = None, loopback_gain: float | None = None) -> Dict[str, Any]:
+    def _clamp(val: float) -> float:
+        if not np.isfinite(val):
+            return 1.0
+        return max(0.1, min(5.0, float(val)))
+
+    with state.capture.lock:
+        if mic_gain is not None:
+            state.capture.mic_gain = _clamp(float(mic_gain))
+        if loopback_gain is not None:
+            state.capture.loopback_gain = _clamp(float(loopback_gain))
+        return {
+            "ok": True,
+            "mic_gain": float(state.capture.mic_gain),
+            "loopback_gain": float(state.capture.loopback_gain),
+        }
+
 
 
 
@@ -1185,6 +1213,8 @@ def capture_debug(state: State) -> Dict[str, Any]:
         "last_error_age_ms": err_age_ms,
         "loopback_backend": state.capture.loopback_backend,
         "loopback_device": state.capture.loopback_device,
+        "mic_gain": float(state.capture.mic_gain),
+        "loopback_gain": float(state.capture.loopback_gain),
     }
 
 

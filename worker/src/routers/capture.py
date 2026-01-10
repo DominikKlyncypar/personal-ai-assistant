@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, Depends
 
 from ..services import capture as svc
 from ..state import get_state, State
-from ..models.capture import StartCaptureRequest, StartStopResponse, CaptureStatusResponse, LevelResponse, DumpWavResponse
+from ..models.capture import StartCaptureRequest, StartStopResponse, CaptureStatusResponse, LevelResponse, DumpWavResponse, MixConfigRequest, MixConfigResponse
 
 router = APIRouter(tags=["capture"])
 
@@ -41,6 +41,11 @@ def v1_dump_wav(seconds: int = 5, label: str | None = None, state: State = Depen
 @router.get("/capture_debug")
 def v1_capture_debug(state: State = Depends(get_state)):
     return svc.capture_debug(state)
+
+
+@router.post("/mix_config", response_model=MixConfigResponse)
+def v1_mix_config(payload: MixConfigRequest, state: State = Depends(get_state)) -> MixConfigResponse:
+    return svc.set_mix_config(state, mic_gain=payload.mic_gain, loopback_gain=payload.loopback_gain)
 
 
 @router.get("/devices")

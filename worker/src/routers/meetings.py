@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi import Response
 from fastapi.responses import PlainTextResponse, HTMLResponse
@@ -67,7 +68,18 @@ def v1_meetings(limit: int = Query(200, ge=1, le=1000)) -> Dict[str, Any]:
 def v1_meeting_delete(
     meeting_id: int,
     cascade: bool = Query(default=True, description="If true, also delete all utterances for the meeting."),
+    state: State = Depends(get_state),
 ) -> Dict[str, Any]:
+    filenames: List[str] = []
+    if cascade:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT filename FROM utterances WHERE meeting_id = ? AND filename IS NOT NULL AND filename != ''",
+                (meeting_id,),
+            )
+            filenames = [r[0] for r in cur.fetchall() if r and r[0]]
+
     try:
         deleted_meeting, deleted_utt = delete_meeting(meeting_id, cascade=cascade)
     except ValueError as e:
@@ -76,11 +88,51 @@ def v1_meeting_delete(
     if deleted_meeting == 0:
         raise HTTPException(status_code=404, detail=f"Meeting {meeting_id} not found")
 
+    deleted_audio = 0
+    if cascade and deleted_meeting and filenames:
+        base_dir = Path(state.tmp_dir).resolve()
+        for name in filenames:
+            try:
+                p = Path(str(name))
+                if p.is_absolute():
+                    candidate = p
+                else:
+                    candidate = base_dir / p.name
+                candidate = candidate.resolve()
+                try:
+                    candidate.relative_to(base_dir)
+                except Exception:
+                    continue
+                if candidate.is_file():
+                    candidate.unlink()
+                    deleted_audio += 1
+            except Exception:
+                continue
+
+    deleted_exports = 0
+    if cascade and deleted_meeting:
+        exports_dir = Path(__file__).resolve().parent.parent / "exports"
+        if exports_dir.is_dir():
+            patterns = [
+                f"meeting-{meeting_id}-*.md",
+                f"meeting-{meeting_id}-*.docx",
+            ]
+            for pattern in patterns:
+                for path in exports_dir.glob(pattern):
+                    try:
+                        if path.is_file():
+                            path.unlink()
+                            deleted_exports += 1
+                    except Exception:
+                        continue
+
     return {
         "ok": True,
         "meeting_id": meeting_id,
         "deleted_meeting": deleted_meeting,
         "deleted_utterances": deleted_utt,
+        "deleted_audio_files": deleted_audio,
+        "deleted_export_files": deleted_exports,
     }
 
 

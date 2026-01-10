@@ -25,6 +25,8 @@ class CaptureState:
     controller: Any | None = None
     loopback_backend: Optional[str] = None
     loopback_device: Optional[str] = None
+    mic_gain: float = 1.8
+    loopback_gain: float = 1.0
 
 
 @dataclass
