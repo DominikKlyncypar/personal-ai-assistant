@@ -1,31 +1,60 @@
 # Personal AI Assistant
 
-Desktop app built with:
-- Electron + React (UI) in `/app`
-- Python FastAPI (AI worker) in `/worker`
+Local desktop assistant for capturing meetings, transcribing audio, and generating readable notes.
 
-## Current Status
-Phase 0 complete:
-- Node/Electron skeleton
-- Python venv + FastAPI health
-- Shared configs: .editorconfig, Prettier, ESLint, Black, Ruff
+## Highlights
+- Windows system audio capture via WASAPI loopback.
+- Mic capture with auto-transcribe on speech end.
+- Meeting summaries with Groq or OpenAI (user-provided key).
+- Notes export (Markdown/DOCX) and transcript history.
+
+## Tech Stack
+- Electron app in `app/` (HTML/CSS/JS)
+- Python FastAPI worker in `worker/`
 
 ## Run (dev)
-- UI:
-  cd app && npm start
-- Worker:
-  cd worker && source .venv/bin/activate && uvicorn src.main:app --reload --port 8000
 
-## Windows Build (.exe) & Auto-Update
+Prereqs:
+- Node.js 20+
+- Python 3.11
 
-- The Electron project now uses `electron-builder` and `electron-updater`. To create a local Windows installer run:
-  1. Install dependencies: `cd app && npm ci`
-  2. Build a Windows virtualenv for the worker (run on Windows):  
-     `cd worker && python -m venv .venv && .\.venv\Scripts\pip install -r requirements.txt`
-  3. Package: `cd app && npm run dist:win`
-- GitHub Actions workflow `.github/workflows/release-windows.yml` builds the Windows installer and publishes a release on every push to `main` (and on manual dispatch). Each run bumps the patch version using the workflow run number and uploads installers to GitHub Releases so that shipped builds auto-update.
-- To enable publishing from your local machine set `GH_TOKEN` with a GitHub PAT and run `npm run dist:publish`.
+Worker (Windows PowerShell):
+```
+cd worker
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn src.main:app --reload --port 8000
+```
 
-## Releases
+Worker (macOS/Linux):
+```
+cd worker
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn src.main:app --reload --port 8000
+```
 
-- Latest: [1.1.25](CHANGELOG.md#1125---2025-10-12) — mix loopback audio with your mic on Windows and surface Stereo Mix–style devices directly in the playback picker.
+App:
+```
+cd app
+npm ci
+npm start
+```
+
+## Summaries (Groq/OpenAI)
+Open Advanced settings in the app and set your provider + API key. Keys are stored locally and sent to the local worker only.
+
+## Build Windows Installer
+```
+cd app
+npm run dist:win
+```
+
+## Release Builds (GitHub)
+The workflow `.github/workflows/release-windows.yml` publishes Windows installers on pushes to `main`.
+Set `GH_TOKEN` as a repo secret with `contents: write` permission.
+
+## Changelog
+See `CHANGELOG.md`.
