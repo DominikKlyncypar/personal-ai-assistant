@@ -99,6 +99,7 @@
         background: radial-gradient(1200px 800px at 10% -10%, rgba(110,231,255,0.08), transparent 40%),
                     radial-gradient(900px 600px at 110% 10%, rgba(63,180,255,0.08), transparent 40%),
                     var(--bg);
+        background-attachment: fixed;
         color:var(--text);
         font: 16px/1.6 var(--font-body);
       }
@@ -211,9 +212,63 @@
       .vad{grid-column: 1 / -1}
       .transcripts{grid-column: 1 / -1}
 
+      /* Home view */
+      .home{ grid-column: 1 / -1; display:flex; flex-direction:column; gap:16px; }
+      .home-hero{ padding:18px; }
+      .home-title{ font-family: var(--font-display); font-size:22px; margin:0 0 6px 0; }
+      .home-subtitle{ margin:0; color:var(--muted); }
+      .home-grid{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; }
+      .feature-card{
+        appearance:none;
+        border:1px solid var(--border);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        color:var(--text);
+        padding:18px;
+        text-align:left;
+        display:flex;
+        flex-direction:column;
+        gap:12px;
+        cursor:pointer;
+        position:relative;
+        overflow:hidden;
+        box-shadow: var(--shadow);
+        transition: transform .12s ease, border-color .2s ease, box-shadow .2s ease;
+      }
+      .feature-card:hover{
+        transform: translateY(-2px);
+        border-color: var(--brand);
+        box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+      }
+      .feature-card.is-preview{ background: linear-gradient(180deg, #141722, #0f1218); }
+      .feature-card .tag{
+        display:inline-flex; align-items:center; gap:6px;
+        padding:4px 10px; border-radius:999px; font-size:12px;
+        border:1px solid var(--border); background: rgba(255,255,255,0.03);
+      }
+      .feature-card .tag.preview{ color:#eab308; border-color: rgba(234,179,8,0.35); }
+      .feature-card .title{ font-family: var(--font-display); font-size:18px; margin:0; }
+      .feature-card p{ margin:0; color:var(--muted); }
+      .feature-icon{
+        width:44px; height:44px; border-radius:12px;
+        display:inline-flex; align-items:center; justify-content:center;
+        background: linear-gradient(135deg, rgba(110,231,255,0.2), rgba(63,180,255,0.35));
+        border:1px solid rgba(110,231,255,0.25);
+      }
+      .feature-icon svg{ width:22px; height:22px; }
+      .dropzone{
+        border:1px dashed var(--border);
+        border-radius: 14px;
+        padding:22px;
+        background: rgba(255,255,255,0.03);
+        color: var(--muted);
+        text-align:center;
+      }
+
       @media (max-width: 920px){
         .container{grid-template-columns: 1fr}
         .audio, .vad, .devices, .transcripts{grid-column: 1 / -1}
+        .home-grid{ grid-template-columns: 1fr; }
       }
 
       /* Toasts (little notifications in bottom-right) */
@@ -255,6 +310,7 @@
           </div>
         </div>
         <div class="row">
+          <button id="homeBtn" type="button" class="btn-ghost" title="Back to home" aria-label="Back to home">Home</button>
           <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode" aria-label="Toggle light or dark mode">Toggle theme</button>
           <span id="appVersionBadge" class="status muted" title="Application version">v?.?.?</span>
           <span class="muted">Worker:</span>
@@ -488,6 +544,7 @@
         </div>
         <div id="transcriptBox" style="margin-top:10px"><em>No transcripts yet.</em></div>
       </section>
+
     </div>
 
     <!-- Toast host (absolute positioned notification area) -->
@@ -548,6 +605,16 @@
         } else if (typeof systemThemeMedia.addListener === 'function') {
           systemThemeMedia.addListener(handleSchemeChange);
         }
+      }
+
+      // ---------------------------------------------------------------------
+      // Basic navigation to home page
+      // ---------------------------------------------------------------------
+      const homeBtn = document.getElementById('homeBtn');
+      if (homeBtn) {
+        homeBtn.addEventListener('click', () => {
+          window.location.href = 'home.html';
+        });
       }
 
       const appVersionBadge = document.getElementById('appVersionBadge');

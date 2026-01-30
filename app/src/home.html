@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI Assistant</title>
+    <meta http-equiv="Content-Security-Policy"
+          content="
+            default-src 'self';
+            script-src 'self' 'unsafe-inline';
+            connect-src 'self' http://127.0.0.1:8000;
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data:;
+          ">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function(){
+        try{
+          var storageKey = 'ui.theme';
+          var stored = window.localStorage ? localStorage.getItem(storageKey) : null;
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored || (prefersDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+        }catch(err){
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+    <style>
+      :root{
+        color-scheme: dark;
+        --bg: #0b0c10;
+        --panel: #111218;
+        --panel-2:#0e1015;
+        --muted:#a9b1bb;
+        --text:#e8ecf1;
+        --brand:#6ee7ff;
+        --brand-2:#3fb4ff;
+        --ok:#26a269;
+        --bad:#c01c28;
+        --border: rgba(255,255,255,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.35);
+        --radius: 14px;
+        --field-bg:#161b24;
+        --field-text:#e8ecf1;
+        --font-body: "Calibri", "Segoe UI", "Trebuchet MS", sans-serif;
+        --font-display: "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+      }
+      :root[data-theme="dark"]{
+        color-scheme: dark;
+        --bg: #0b0c10;
+        --panel: #111218;
+        --panel-2:#0e1015;
+        --muted:#a9b1bb;
+        --text:#e8ecf1;
+        --brand:#6ee7ff;
+        --brand-2:#3fb4ff;
+        --ok:#26a269;
+        --bad:#c01c28;
+        --border: rgba(255,255,255,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.35);
+        --radius: 14px;
+        --field-bg:#161b24;
+        --field-text:#e8ecf1;
+      }
+      :root[data-theme="light"]{
+        color-scheme: light;
+        --bg:#f6f8fb;
+        --panel:#ffffff;
+        --panel-2:#fdfefe;
+        --muted:#54606e;
+        --text:#10131a;
+        --brand:#0ea5e9;
+        --brand-2:#2563eb;
+        --ok:#15803d;
+        --bad:#b91c1c;
+        --border: rgba(0,0,0,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.08);
+        --field-bg:#ffffff;
+        --field-text:#10131a;
+      }
+
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{
+        margin:0; padding:24px;
+        background: radial-gradient(1200px 800px at 10% -10%, rgba(110,231,255,0.08), transparent 40%),
+                    radial-gradient(900px 600px at 110% 10%, rgba(63,180,255,0.08), transparent 40%),
+                    var(--bg);
+        background-attachment: fixed;
+        color:var(--text);
+        font: 16px/1.6 var(--font-body);
+      }
+
+      .container{ max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      header{ grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+      .brand{ display:flex; align-items:center; gap:12px; letter-spacing:0.2px; }
+      .brand-title{ font-family: var(--font-display); font-size:18px; font-weight:700; }
+      .brand-subtitle{ font-size:12px; }
+      .logo{
+        width:36px; height:36px; border-radius:10px;
+        background: conic-gradient(from 220deg, var(--brand), var(--brand-2), var(--brand));
+        box-shadow: 0 8px 18px rgba(63,180,255,0.35);
+      }
+      .subtle{color:var(--muted)}
+
+      .card{
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border:1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding:16px;
+        position: relative;
+        overflow: hidden;
+      }
+      .card::before{
+        content:""; position:absolute; inset: 0; pointer-events:none;
+        background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.00)); opacity:.25;
+      }
+      .row{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+      .stack{display:flex; flex-direction:column; gap:8px}
+      .spaced{display:flex; align-items:center; justify-content:space-between; gap:12px}
+      .muted{color:var(--muted)}
+
+      button{
+        appearance:none; border:1px solid var(--border); color:var(--text);
+        background: linear-gradient(180deg, #1a1d25, #0f1218);
+        border-radius: 12px; padding:9px 14px; cursor:pointer;
+        font-size:14px; min-height:40px;
+        transition: transform .06s ease, border-color .2s ease, background .2s ease;
+      }
+      button:hover{transform: translateY(-1px); border-color: var(--brand)}
+      .btn-primary{ background: linear-gradient(180deg, var(--brand), var(--brand-2)); color:#041018; border-color: transparent; font-weight:600; }
+      .btn-ghost{ background: transparent; }
+      .status{
+        padding: 6px 10px; border-radius:999px; font-size:12px;
+        border:1px solid var(--border); background: rgba(255,255,255,0.03);
+      }
+
+      .home{ grid-column: 1 / -1; display:flex; flex-direction:column; gap:16px; }
+      .home-hero{ padding:18px; }
+      .home-title{ font-family: var(--font-display); font-size:22px; margin:0 0 6px 0; }
+      .home-subtitle{ margin:0; color:var(--muted); }
+      .home-grid{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; }
+      .feature-card{
+        appearance:none;
+        border:1px solid var(--border);
+        border-radius: var(--radius);
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        color:var(--text);
+        padding:18px;
+        text-align:left;
+        display:flex;
+        flex-direction:column;
+        gap:12px;
+        cursor:pointer;
+        position:relative;
+        overflow:hidden;
+        box-shadow: var(--shadow);
+        transition: transform .12s ease, border-color .2s ease, box-shadow .2s ease;
+      }
+      .feature-card:hover{
+        transform: translateY(-2px);
+        border-color: var(--brand);
+        box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+      }
+      .feature-card.is-preview{ background: linear-gradient(180deg, #141722, #0f1218); }
+      :root[data-theme="light"] .feature-card.is-preview{
+        background: linear-gradient(180deg, #f3f6fb, #e9eef6);
+      }
+      .feature-card .tag{
+        display:inline-flex; align-items:center; gap:6px;
+        padding:4px 10px; border-radius:999px; font-size:12px;
+        border:1px solid var(--border); background: rgba(255,255,255,0.03);
+      }
+      .feature-card .tag.preview{ color:#eab308; border-color: rgba(234,179,8,0.35); }
+      .feature-card .title{ font-family: var(--font-display); font-size:18px; margin:0; }
+      .feature-card p{ margin:0; color:var(--muted); }
+      .feature-icon{
+        width:44px; height:44px; border-radius:12px;
+        display:inline-flex; align-items:center; justify-content:center;
+        background: linear-gradient(135deg, rgba(110,231,255,0.2), rgba(63,180,255,0.35));
+        border:1px solid rgba(110,231,255,0.25);
+      }
+      .feature-icon svg{ width:22px; height:22px; }
+
+      @media (max-width: 920px){
+        .container{grid-template-columns: 1fr}
+        .home-grid{ grid-template-columns: 1fr; }
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        *{ transition:none !important; animation:none !important }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="brand">
+          <div class="logo"></div>
+          <div>
+            <div class="brand-title">AI Assistant</div>
+            <div class="brand-subtitle subtle">Desktop capture - Whisper - Notes</div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode" aria-label="Toggle light or dark mode">Toggle theme</button>
+          <span id="appVersionBadge" class="status muted" title="Application version">v?.?.?</span>
+        </div>
+      </header>
+
+      <section class="home">
+        <div class="card home-hero">
+          <div class="spaced">
+            <div>
+              <h2 class="home-title">Choose a workspace</h2>
+              <p class="home-subtitle">Pick a tool to get started. More workflows are coming soon.</p>
+            </div>
+            <span class="status muted">Multifunction</span>
+          </div>
+        </div>
+
+        <div class="home-grid">
+          <button class="feature-card" type="button" data-target="index.html">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 4h16v12H4z"/><path d="M8 20h8"/><path d="M9 16v4"/><path d="M15 16v4"/>
+              </svg>
+            </div>
+            <div class="stack">
+              <h3 class="title">Meeting Notes</h3>
+              <p>Record system audio + mic, auto-transcribe, and generate shareable notes.</p>
+            </div>
+            <div class="row">
+              <span class="tag">Available now</span>
+            </div>
+          </button>
+
+          <button class="feature-card is-preview" type="button" data-target="instagram.html">
+            <div class="feature-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="4" y="4" width="16" height="16" rx="4"/><circle cx="12" cy="12" r="3.2"/><circle cx="16.5" cy="7.5" r="1"/>
+              </svg>
+            </div>
+            <div class="stack">
+              <h3 class="title">Instagram Bot</h3>
+              <p>Drag images in, generate a caption with Groq, and auto-post to Instagram.</p>
+            </div>
+            <div class="row">
+              <span class="tag preview">Preview</span>
+            </div>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const themeToggleBtn = document.getElementById('themeToggle');
+      const themeStorageKey = 'ui.theme';
+      let currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+
+      function setTheme(theme, { persist = true } = {}) {
+        const normalized = theme === 'light' ? 'light' : 'dark';
+        currentTheme = normalized;
+        document.documentElement.setAttribute('data-theme', normalized);
+        if (persist) {
+          try {
+            localStorage.setItem(themeStorageKey, normalized);
+          } catch (_) {
+            /* ignore storage failures */
+          }
+        }
+        if (themeToggleBtn) {
+          const label = normalized === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+          themeToggleBtn.textContent = label;
+          themeToggleBtn.setAttribute('aria-label', label);
+        }
+      }
+
+      setTheme(currentTheme, { persist: false });
+      if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+          const next = currentTheme === 'dark' ? 'light' : 'dark';
+          setTheme(next);
+        });
+      }
+
+      const systemThemeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      if (systemThemeMedia) {
+        const handleSchemeChange = (event) => {
+          try {
+            if (localStorage.getItem(themeStorageKey)) return;
+          } catch (_) {
+            /* ignore access issues */
+          }
+          setTheme(event.matches ? 'dark' : 'light', { persist: false });
+        };
+        if (typeof systemThemeMedia.addEventListener === 'function') {
+          systemThemeMedia.addEventListener('change', handleSchemeChange);
+        } else if (typeof systemThemeMedia.addListener === 'function') {
+          systemThemeMedia.addListener(handleSchemeChange);
+        }
+      }
+
+      const appVersionBadge = document.getElementById('appVersionBadge');
+      let appVersion = '?.?.?';
+      if (window.appInfo && typeof window.appInfo.subscribe === 'function') {
+        window.appInfo.subscribe(info => {
+          if (info && typeof info.version === 'string') {
+            appVersion = info.version;
+            if (appVersionBadge) {
+              appVersionBadge.textContent = `v${appVersion}`;
+              appVersionBadge.title = `Application version ${appVersion}`;
+            }
+          }
+        });
+      }
+
+      document.querySelectorAll('[data-target]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const target = btn.dataset.target || 'home.html';
+          window.location.href = target;
+        });
+      });
+    </script>
+  </body>
+</html>

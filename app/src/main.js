@@ -211,8 +211,8 @@ function createWindow() {
   })
 
   // Load a local HTML file into the window
-  win.loadFile(path.join(__dirname, 'index.html'))
-  win.webContents.once('did-finish-load', () => {
+  win.loadFile(path.join(__dirname, 'home.html'))
+  win.webContents.on('did-finish-load', () => {
     let logFilePath = null
     try {
       const file = log.transports.file.getFile()

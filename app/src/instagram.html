@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>AI Assistant - Instagram Bot</title>
+    <meta http-equiv="Content-Security-Policy"
+          content="
+            default-src 'self';
+            script-src 'self' 'unsafe-inline';
+            connect-src 'self' http://127.0.0.1:8000;
+            style-src 'self' 'unsafe-inline';
+            img-src 'self' data:;
+          ">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function(){
+        try{
+          var storageKey = 'ui.theme';
+          var stored = window.localStorage ? localStorage.getItem(storageKey) : null;
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var theme = stored || (prefersDark ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', theme);
+        }catch(err){
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+    <style>
+      :root{
+        color-scheme: dark;
+        --bg: #0b0c10;
+        --panel: #111218;
+        --panel-2:#0e1015;
+        --muted:#a9b1bb;
+        --text:#e8ecf1;
+        --brand:#6ee7ff;
+        --brand-2:#3fb4ff;
+        --ok:#26a269;
+        --bad:#c01c28;
+        --border: rgba(255,255,255,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.35);
+        --radius: 14px;
+        --field-bg:#161b24;
+        --field-text:#e8ecf1;
+        --font-body: "Calibri", "Segoe UI", "Trebuchet MS", sans-serif;
+        --font-display: "Bahnschrift", "Trebuchet MS", "Segoe UI", sans-serif;
+      }
+      :root[data-theme="dark"]{
+        color-scheme: dark;
+        --bg: #0b0c10;
+        --panel: #111218;
+        --panel-2:#0e1015;
+        --muted:#a9b1bb;
+        --text:#e8ecf1;
+        --brand:#6ee7ff;
+        --brand-2:#3fb4ff;
+        --ok:#26a269;
+        --bad:#c01c28;
+        --border: rgba(255,255,255,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.35);
+        --radius: 14px;
+        --field-bg:#161b24;
+        --field-text:#e8ecf1;
+      }
+      :root[data-theme="light"]{
+        color-scheme: light;
+        --bg:#f6f8fb;
+        --panel:#ffffff;
+        --panel-2:#fdfefe;
+        --muted:#54606e;
+        --text:#10131a;
+        --brand:#0ea5e9;
+        --brand-2:#2563eb;
+        --ok:#15803d;
+        --bad:#b91c1c;
+        --border: rgba(0,0,0,0.08);
+        --shadow: 0 8px 24px rgba(0,0,0,0.08);
+        --field-bg:#ffffff;
+        --field-text:#10131a;
+      }
+
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{
+        margin:0; padding:24px;
+        background: radial-gradient(1200px 800px at 10% -10%, rgba(110,231,255,0.08), transparent 40%),
+                    radial-gradient(900px 600px at 110% 10%, rgba(63,180,255,0.08), transparent 40%),
+                    var(--bg);
+        background-attachment: fixed;
+        color:var(--text);
+        font: 16px/1.6 var(--font-body);
+      }
+
+      .container{ max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      header{ grid-column: 1 / -1; display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
+      .brand{ display:flex; align-items:center; gap:12px; letter-spacing:0.2px; }
+      .brand-title{ font-family: var(--font-display); font-size:18px; font-weight:700; }
+      .brand-subtitle{ font-size:12px; }
+      .logo{
+        width:36px; height:36px; border-radius:10px;
+        background: conic-gradient(from 220deg, var(--brand), var(--brand-2), var(--brand));
+        box-shadow: 0 8px 18px rgba(63,180,255,0.35);
+      }
+      .subtle{color:var(--muted)}
+
+      .card{
+        background: linear-gradient(180deg, var(--panel), var(--panel-2));
+        border:1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding:16px;
+        position: relative;
+        overflow: hidden;
+        grid-column: 1 / -1;
+      }
+      .card h2{
+        margin:0 0 10px 0;
+        font-size:18px;
+        font-family: var(--font-display);
+        letter-spacing:0.2px;
+      }
+      .card::before{
+        content:""; position:absolute; inset: 0; pointer-events:none;
+        background: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.00)); opacity:.25;
+      }
+      .row{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+      .spaced{display:flex; align-items:center; justify-content:space-between; gap:12px}
+      .muted{color:var(--muted)}
+      .help{font-size:13px; color:var(--muted); margin-top:6px}
+
+      button{
+        appearance:none; border:1px solid var(--border); color:var(--text);
+        background: linear-gradient(180deg, #1a1d25, #0f1218);
+        border-radius: 12px; padding:9px 14px; cursor:pointer;
+        font-size:14px; min-height:40px;
+        transition: transform .06s ease, border-color .2s ease, background .2s ease;
+      }
+      button:hover{transform: translateY(-1px); border-color: var(--brand)}
+      button:disabled{ opacity:.55; cursor:not-allowed; filter:saturate(.7); }
+      .btn-primary{ background: linear-gradient(180deg, var(--brand), var(--brand-2)); color:#041018; border-color: transparent; font-weight:600; }
+      .btn-ghost{ background: transparent; }
+      .status{
+        padding: 6px 10px; border-radius:999px; font-size:12px;
+        border:1px solid var(--border); background: rgba(255,255,255,0.03);
+      }
+      .dropzone{
+        border:1px dashed var(--border);
+        border-radius: 14px;
+        padding:22px;
+        background: rgba(255,255,255,0.03);
+        color: var(--muted);
+        text-align:center;
+      }
+
+      @media (max-width: 920px){
+        .container{grid-template-columns: 1fr}
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        *{ transition:none !important; animation:none !important }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <div class="brand">
+          <div class="logo"></div>
+          <div>
+            <div class="brand-title">AI Assistant</div>
+            <div class="brand-subtitle subtle">Instagram Bot (Preview)</div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="homeBtn" type="button" class="btn-ghost" title="Back to home" aria-label="Back to home">Home</button>
+          <button id="themeToggle" type="button" class="btn-ghost" title="Toggle light or dark mode" aria-label="Toggle light or dark mode">Toggle theme</button>
+          <span id="appVersionBadge" class="status muted" title="Application version">v?.?.?</span>
+        </div>
+      </header>
+
+      <section class="card">
+        <div class="spaced">
+          <h2>Instagram Bot</h2>
+          <span class="status muted">Preview</span>
+        </div>
+        <p class="muted">Drop images, describe them with Groq, generate a caption, then post to Instagram.</p>
+        <div class="dropzone">Drag images here to preview the upload flow (coming soon).</div>
+        <div class="row" style="margin-top:12px">
+          <button type="button" class="btn-ghost" disabled>Describe Images</button>
+          <button type="button" class="btn-ghost" disabled>Generate Caption</button>
+          <button type="button" class="btn-primary" disabled>Post to Instagram</button>
+        </div>
+        <div class="help">Placeholder view only — wiring to Groq + Instagram will come next.</div>
+      </section>
+    </div>
+
+    <script>
+      const themeToggleBtn = document.getElementById('themeToggle');
+      const themeStorageKey = 'ui.theme';
+      let currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+
+      function setTheme(theme, { persist = true } = {}) {
+        const normalized = theme === 'light' ? 'light' : 'dark';
+        currentTheme = normalized;
+        document.documentElement.setAttribute('data-theme', normalized);
+        if (persist) {
+          try {
+            localStorage.setItem(themeStorageKey, normalized);
+          } catch (_) {
+            /* ignore storage failures */
+          }
+        }
+        if (themeToggleBtn) {
+          const label = normalized === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+          themeToggleBtn.textContent = label;
+          themeToggleBtn.setAttribute('aria-label', label);
+        }
+      }
+
+      setTheme(currentTheme, { persist: false });
+      if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', () => {
+          const next = currentTheme === 'dark' ? 'light' : 'dark';
+          setTheme(next);
+        });
+      }
+
+      const systemThemeMedia = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+      if (systemThemeMedia) {
+        const handleSchemeChange = (event) => {
+          try {
+            if (localStorage.getItem(themeStorageKey)) return;
+          } catch (_) {
+            /* ignore access issues */
+          }
+          setTheme(event.matches ? 'dark' : 'light', { persist: false });
+        };
+        if (typeof systemThemeMedia.addEventListener === 'function') {
+          systemThemeMedia.addEventListener('change', handleSchemeChange);
+        } else if (typeof systemThemeMedia.addListener === 'function') {
+          systemThemeMedia.addListener(handleSchemeChange);
+        }
+      }
+
+      const appVersionBadge = document.getElementById('appVersionBadge');
+      let appVersion = '?.?.?';
+      if (window.appInfo && typeof window.appInfo.subscribe === 'function') {
+        window.appInfo.subscribe(info => {
+          if (info && typeof info.version === 'string') {
+            appVersion = info.version;
+            if (appVersionBadge) {
+              appVersionBadge.textContent = `v${appVersion}`;
+              appVersionBadge.title = `Application version ${appVersion}`;
+            }
+          }
+        });
+      }
+
+      const homeBtn = document.getElementById('homeBtn');
+      if (homeBtn) {
+        homeBtn.addEventListener('click', () => {
+          window.location.href = 'home.html';
+        });
+      }
+    </script>
+  </body>
+</html>
